@@ -15,11 +15,11 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 
 
+Co-authored by DeepSeek, Corentin Amice, "The Mirror", "The Calibration Hammer" and "The Dancing Hammer".
 
-# GUNZ 3.9.8 — Gamified Underlying Navigation Zones  
+# GUNZ 3.9.9 — Gamified Underlying Navigation Zones  
 **ISA · Runtime · Library · Network**
 
-Co-authored by DeepSeek, Corentin Amice, "The Mirror", "The Calibration Hammer" and "The Dancing Hammer".
 ---
 
 ## Foreword: On the Game of Truth
@@ -42,7 +42,7 @@ The game of truth versus hallucination has no final level. But it has rules. And
 
 ## 1. Overview
 
-GUNZ 3.9.8 (Gamified Underlying Navigation Zones) is a deterministic, offline‑scanner runtime for discrete‑clock systems. It produces compressed resonance maps — **stability topographies** — that describe optimal operating frequencies for any process governed by a fixed‑quantum clock. The format targets AI‑driven feedback loops, heterogeneous hardware deployment, and long‑term archival.
+GUNZ 3.9.9 (Gamified Underlying Navigation Zones) is a deterministic, offline‑scanner runtime for discrete‑clock systems. It produces compressed resonance maps — **stability topographies** — that describe optimal operating frequencies for any process governed by a fixed‑quantum clock. The format targets AI‑driven feedback loops, heterogeneous hardware deployment, and long‑term archival.
 
 Conceptually, GUNZ is a **game engine for truth**. The AI is a player: it proposes a model (a set of parameters) as its move. GUNZ executes the deterministic physics of the clock model and returns a **scoreboard** — the resonance map — showing where the model aligns with reality (stable valleys, low jitter), where it diverges (sharp edges, jitter spikes, death zones), and how far off it is. Like Conway’s Game of Life, simple integer rules produce an infinite landscape of emergent behaviour; unlike Conway’s game, the purpose is not observation but **navigation** — finding the paths through the space that are true.
 
@@ -127,8 +127,8 @@ These opcodes are deterministic and may only be used by programs that satisfy th
 | `0x03` | `ZONE` | `u32 fps_low, u32 fps_high` | Define a **playground** — an FPS range for evaluation. Both boundaries are given in 0.00001 FPS units. The zone must satisfy `fps_low ≥ 10001` (i.e., at least 0.10001 FPS) to guarantee the jitter window stays within the positive domain; otherwise the zone is rejected with `GUNZ_MALFORMED_BYTECODE`. |
 | `0x0C` | `SKIP_ZONE` | `u32 fps_low, u32 fps_high` | Skip evaluation of this playground. The scanner emits one placeholder entry covering the full skipped interval; sparse merging rules apply normally.  See §3.11 for emission rules. |
 | `0x04` | `EXPORT` | `u32 object_id, u32 len` | Write compressed map to the runtime object identified by `object_id`. `len` is the expected number of bytes to write; if the actual map size differs, the operation shall still succeed as long as the map is valid.  Integrity is guaranteed by the map’s XXH3‑64 checksum, not by `len`. |
-| `0x05` | `IMPORT` | `u32 object_id, u32 len` | Read and merge an external map from `object_id`. The runtime must ensure that the imported map is not mutated while the import is in progress; either a snapshot copy or an immutable object is used. `len` is the expected number of bytes to read. Imported maps must have the same `time_unit` and `map_version` as the importing map; otherwise the import fails with `GUNZ_INVALID_LIBRARY`.  The XXH3‑64 checksum is validated on import; mismatch causes rejection. |
-| `0x06` | `JOIN` | `u32 mapA_id, u32 mapA_len, u32 mapB_id, u32 mapB_len, u32 out_id` | Intersect two maps. `len` operands are the expected byte counts. All maps involved must share the same `time_unit` and `map_version`.  The combined map covers the FPS range where both input maps overlap.  For each entry in the overlapping region, the resulting `block_time_delta`, `jitter`, `motion_jitter`, and `peak_motion_jitter` are taken as the **maximum** of the two input values; the `stability_width` is taken as the **minimum**; `flags` are the bitwise OR.  This pessimistic merge ensures the joined map reflects worst‑case behaviour. |
+| `0x05` | `IMPORT` | `u32 object_id, u32 len` | Read and merge an external map from `object_id`. The runtime must ensure that the imported map is not mutated while the import is in progress; either a snapshot copy or an immutable object is used. `len` is a hint for buffer allocation; the actual number of bytes read is determined by the map data and validated by the XXH3‑64 checksum. A mismatch between `len` and the actual map size does not cause failure. Imported maps must have the same `time_unit` and `map_version` as the importing map; otherwise the import fails with `GUNZ_INVALID_LIBRARY`.  The XXH3‑64 checksum is validated on import; mismatch causes rejection. |
+| `0x06` | `JOIN` | `u32 mapA_id, u32 mapA_len, u32 mapB_id, u32 mapB_len, u32 out_id` | Intersect two maps. `len` operands are the expected byte counts. All maps involved must share the same `time_unit`, `map_version`, `base_fps`, and `step_fps` (i.e., they must have been scanned at identical resolution and starting FPS).  The combined map covers the FPS range where both input maps overlap.  For each entry in the overlapping region, the resulting `block_time_delta`, `jitter`, `motion_jitter`, and `peak_motion_jitter` are taken as the **maximum** of the two input values; the `stability_width` is taken as the **minimum**; `flags` are the bitwise OR.  This pessimistic merge ensures the joined map reflects worst‑case behaviour. |
 | `0x07` | `STREAM` | `u32 callback_id` | Set streaming callback for batched map output. The callback must be a `PURE_CALL`‑compatible function. The runtime performs actual I/O on separate worker threads; the callback itself must not block and must complete within a deterministic, constant‑time budget relative to its arguments. If the streaming callback cannot consume entries at the rate they are produced, the runtime shall pause the evaluator until buffer space becomes available. This pause shall release any evaluator‑held scratch‑arena locks or ring‑buffer references before waiting, to prevent deadlock with consumer/flusher threads.  The pause is not considered a callback execution; it is a backpressure mechanism to bound memory usage. |
 | `0x08` | (reserved) | – | Was `KALMAN`; now reserved. |
 | `0x09` | (reserved) | – | Reserved. |
@@ -399,7 +399,7 @@ The resonance evaluator computes the metrics (`block_time_delta`, `jitter`, `mot
 - `reference_block_time` – taken from the map header (§4.2.1) and embedded into the plan at construction time.
 - `step_fps` – the dense‑scan step size in 0.00001 FPS units.
 - `map_type` – from the map header: `0` = standard, `1` = detrimental. The map header also provides a `detrimental_threshold` value.
-- An optional **explicit delta pair** `(d_lo_ov, d_hi_ov)` with a boolean flag indicating whether the override is active.  If the flag is true, the evaluator uses the override values; otherwise it computes `d_lo`/`d_hi` normally.
+- An optional **explicit delta pair** `(d_lo_ov, d_hi_ov)` with a boolean flag indicating whether the override is active.  If the flag is true, the evaluator uses the override values for the block‑time sum only; it does **not** alter the computation of `N` or `N_hi`.
 - If `long_term_scan` is active, a **measurement window duration** `window_duration` (a `u64` in the **same base time unit as the header**) is supplied at plan construction and embedded in the evaluator block. The normative maximum `window_duration` is **2³² base‑time units**; any request exceeding this value shall cause plan construction to fail with `GUNZ_INVALID_LIBRARY`.
 
 **Algorithm:**
@@ -410,7 +410,8 @@ The evaluator proceeds in two phases:
 
 1. **Compute frame time.**  
    `T = 10^(time_unit + 5) / fps_raw` (64‑bit unsigned integer division; for `time_unit ≤ 12` this is guaranteed not to overflow 64‑bit).  For `time_unit ≥ 10` the numerator `10^(time_unit+5)` must be computed in 128‑bit before division.  
-   If an explicit delta override is **not** active: `d_lo = T / quantum` (floor), `d_hi = d_lo + 1`. Otherwise, `d_lo = d_lo_ov`, `d_hi = d_hi_ov`.
+   Compute the **continuous deltas** that define the temporal pattern of `d_hi` frames:  
+   `d_lo_cont = T / quantum` (floor), `d_hi_cont = d_lo_cont + 1`.
 
 2. **Jitter window evaluation.**  
    21 jitter points at `fps_raw + Δ`, `Δ = -10000, -9000, …, +10000` (Δ is in the same 0.00001 FPS units).  If `fps_raw + Δ ≤ 0` for any Δ, that jitter point is skipped and does not contribute to the sample count.  
@@ -418,29 +419,34 @@ The evaluator proceeds in two phases:
    Motion jitter is computed from the counts `N_lo` and `N_hi` using a closed‑form multiset variance. Each advance value (in ticks) is scaled by 100, yielding two values `a = 100 × adv_lo` and `b = 100 × adv_hi`. The motion jitter for this jitter point is the population standard deviation of the multiset consisting of `N_lo` copies of `a` and `N_hi` copies of `b`, computed via the integer standard deviation algorithm of §4.5.3.  
 
    **Saturation of motion jitter:** Each individual jitter point’s motion jitter value is saturated to 65535 before averaging.  The average of these 21 saturated values (rounded to nearest integer, half‑to‑even) is then itself saturated to 65535 and stored as `motion_jitter`.  The maximum of the 21 saturated values → `peak_motion_jitter` (same scale and saturation).  **Saturation occurs before the conversion to base time units.**  
+   *Note on double saturation:* The per‑point saturation and the final saturation on the average keep the stored values within the 16‑bit range of the map entry fields.  Raw, unsaturation full‑precision statistics are preserved in the optional `.gunzstats` file for detailed analysis.  
 
    **The 21‑sample jitter window is the core deterministic simulation, not a noise perturbation.** All points are evaluated exactly; there is no randomness involved. The window size of 21 points, spaced uniformly at ±0.1 FPS, is normative and must not be altered by implementations. Future revisions of this specification may parameterise the window via a reserved header field; at present it is fixed.
 
 3. **Discrete simulation of a single block.**  
-   Given `T`, `d_lo`, `d_hi`:
-   - `adv_lo = (d_lo * mult_num) / mult_den` (floor), `adv_hi` similarly. Use 128‑bit intermediates.
-   - If `max(adv_lo, adv_hi) == 0`, set saturation sentinels and skip.
-   - Find smallest `N` such that total tick advance ≥ `target_ticks`. Use `N_max` precomputed if deltas are invariant; otherwise compute `N_max = ceil(target_ticks / max(adv_lo, adv_hi, 1))` on the fly.  The computed `N` must not exceed the normative maximum `MAX_N = 2³¹ − 1`; if it would, the candidate is treated as saturated.
+   Given the **continuous deltas** `d_lo_cont`, `d_hi_cont`:
+   - Compute the **continuous advances**: `adv_lo_cont = (d_lo_cont * mult_num) / mult_den` (floor), `adv_hi_cont` similarly.  Use 128‑bit intermediates.
+   - If `max(adv_lo_cont, adv_hi_cont) == 0`, set saturation sentinels and skip.
+   - Find smallest `N` such that total tick advance ≥ `target_ticks`.  Use `N_max` precomputed if the continuous deltas are invariant across the zone; otherwise compute `N_max = ceil(target_ticks / max(adv_lo_cont, adv_hi_cont, 1))` on the fly.  The computed `N` must not exceed the normative maximum `MAX_N = 2³¹ − 1`; if it would, the candidate is treated as saturated.
    - `R = round(N * T / quantum) * quantum` (128‑bit for `N*T`). The rounding function uses the current `round_mode`.
-   - `Q = R / quantum`; `N_hi = Q − N*d_lo`.  
+   - `Q = R / quantum`; compute `N_hi = Q − N*d_lo_cont`.  
      - If `N_hi` is within `[0, N]`, use the computed value.  
      - If `N_hi < 0` or `N_hi > N`, the candidate is invalid (arithmetic inconsistency); set saturated sentinels and `FLAG_AVOID`, and skip the remaining steps for this candidate.  
-   - Block time is `R` (or override formula with `* quantum`).
+   - **Block time computation:**  
+     If an explicit delta override is **not** active: `block_time = R` (the value `R` already incorporates the continuous deltas correctly).  
+     If an explicit delta override **is** active: the override values `d_lo_ov`, `d_hi_ov` are used only for the per‑frame advance magnitudes in the block‑time sum:  
+     `block_time = ((N − N_hi) * d_lo_ov + N_hi * d_hi_ov) * quantum`.  
    - The total time including hold and separation frames is `total_time = block_time + (hold_frames + sep_frames) * T`.
    - In long‑term mode, repeat simulation for consecutive blocks until the cumulative block time (excluding hold/sep frames) reaches or exceeds `window_duration`. The last block is included even if the cumulative time exceeds the window. The map entry then stores the **average** block time over all evaluated blocks, and the aggregate jitter/motion‑jitter over those blocks.  **Long‑term aggregation:** `jitter` is the population standard deviation of the block times across all evaluated blocks; `motion_jitter` is the average motion jitter over the window.  For score computation in long‑term mode, `total_time` is defined as `average_block_time + (hold_frames + sep_frames) * T`, where `T` is the frame time of the FPS candidate.
-   - The total number of blocks evaluated per candidate (in long‑term mode) must not exceed the plan’s `max_eval_iterations`. If this limit is reached, the candidate is marked with saturated sentinels and `FLAG_AVOID`.
+   - The total number of blocks evaluated per candidate (in long‑term mode) must not exceed the plan’s `max_eval_iterations`. If this limit is reached, the candidate is marked with saturated sentinels and `FLAG_AVOID`.  *Note:* The `max_eval_iterations` limit is an upper bound; the evaluator stops as soon as the cumulative time satisfies `window_duration`, which may require far fewer iterations than the bound.
 
 4. **Score computation.**  
    `score = |total_time - reference_block_time| + 4 * jitter + motion_btu`, where `motion_btu = ((uint128_t)motion_jitter * mult_den * quantum) / (mult_num * 100)`, rounded half‑to‑even.  All three terms are in the base time unit.  
+   **Important:** The division by 100 in the `motion_btu` formula must strictly follow the half‑to‑even rounding defined in §4.5.1.  Implementations **MUST NOT** substitute the common C idiom `(val + 50) / 100`, as that implements round‑half‑up and will produce non‑conforming results on exact `.50` ties.  
    The absolute difference `|total_time - reference_block_time|` is saturated to `UINT32_MAX` and stored in `block_time_delta`. Note: the field `block_time_delta` always holds an absolute difference, not the total block time; for the absolute block time, add it to `reference_block_time`.
 
-**Explicit delta override:**  
-The override replaces `d_lo`/`d_hi` for the advance calculations and block‑time sum, but `R` and the `d_hi` placement are still determined by the continuous frame time `T` and the quantum. The block time becomes `((N − N_hi)*d_lo_ov + N_hi*d_hi_ov) * quantum`.
+**Explicit delta override semantics (summary):**  
+When a `DELTA` instruction is active, the override does **not** change the number of frames `N` or the count of `d_hi` frames `N_hi`.  Those are always computed from the continuous deltas `d_lo_cont`, `d_hi_cont`, preserving the temporal pattern dictated by the continuous frame time `T`.  The override values `d_lo_ov`, `d_hi_ov` replace only the per‑frame advance magnitudes in the final block‑time sum, as shown above.
 
 **Map entry consolidation:** After computing all FPS candidates in a zone, consecutive positions with identical `block_time_delta`, `jitter`, `motion_jitter`, `peak_motion_jitter`, and flags are merged into a single entry. Its `run_length` equals the number of merged steps. Only the first entry in the run contributes a `fps_delta_start`; subsequent merged FPS candidates do not. This guarantees deterministic emission regardless of scan resolution.
 
@@ -453,7 +459,7 @@ For each FPS candidate \(c\) with score \(S_c\), let \(T\) be the stability tole
 Because the maximum representable stability width is 6.5535 FPS (stored as `u16` in 0.0001 FPS units), implementations may use a bounded sliding‑window algorithm (e.g., a circular buffer of at most `ceil(6.5535 / (step_fps * 1e-5))` entries) instead of storing the entire zone’s scores. Any algorithm that produces the same maximal intervals is conformant.
 
 - The stability width is `(fps_raw[right] − fps_raw[left]) / 10` (integer division, truncating toward zero), stored in 0.0001 FPS units, saturated to 65535. If `right == left`, the width is 0.
-- **Saturation flag:** If the computed width exceeds 65535 before saturation, bit 0 of the `flags` field (the least significant reserved bit) shall be set to 1.  This indicates that the true stability width exceeds the stored value and can be recovered from the raw statistics file (`.gunzstats`).
+- **Saturation flag:** If the computed width exceeds 65535 before saturation, bit 0 of the `flags` field (`STAB_SATURATED`) shall be set to 1.  This indicates that the true stability width is **at least** 6.5535 FPS (the maximum representable value).  The exact width can be recovered from the raw statistics file (`.gunzstats`).
 - When multiple FPS candidates are merged into a single entry during consolidation, the stored `stability_width` is the **maximum** width among all FPS candidates in that interval.
 
 **Detrimental mode marking:**  
@@ -503,7 +509,7 @@ A library profile is valid only if `quantum ≥ 1`, `mult_num ≠ 0`, and `mult_
 
 | Bit | Name | Description |
 |-----|------|-------------|
-| 0   | `STAB_SATURATED`  | Stability width saturated (true width exceeds stored value) |
+| 0   | `STAB_SATURATED`  | Stability width saturated (true width ≥ 6.5535 FPS) |
 | 1   | `FLAG_AVOID`     | Detrimental resonance. |
 | 2   | `FLAG_SKIPPED`   | Not evaluated; all metrics zero. |
 | 3   | `FLAG_LONG_TERM` | Metrics are long‑term window averages. |
@@ -528,7 +534,7 @@ When `sparse_map` is set, intervals omitted because all quantitative metrics are
 | `detrimental_threshold` | u8 | Threshold in base time unit; 0 defaults to the saturation limit (effectively disabling the check). Shared by both `jitter` and `motion_btu` comparisons. |
 | `time_unit`          | u8  | Decimal exponent such that one base time unit = 10⁻ᵗⁱᵐᵉ_ᵁⁿⁱᵗ seconds. Must match the bytecode header. |
 | `stability_mapping_flag` | u8 | Always 1 in v3.9.x. |
-| `map_version`        | u16 | `0x0006` for v3.9.8 maps.  Decoders shall reject maps with an unknown `map_version`. |
+| `map_version`        | u16 | `0x0006` for v3.9.9 maps.  Decoders shall reject maps with an unknown `map_version`. |
 | `jitter_window_radius` | u8 | Reserved for future use; must be 0 in v3.x. |
 | `xxh3_64`            | u64 | XXH3‑64 checksum (seed=0) of all entries, little‑endian.  This checksum provides per‑file integrity against accidental corruption; for global deduplication and map identity the XXH3‑128 fingerprint (§4.3) must be used. |
 | `reserved`           | u8[5] | Must be zero. |
@@ -564,6 +570,19 @@ else if 2*r > b:      // closer to q+1
 ```
 
 All standard deviation and scoring calculations that use this division operate exclusively on non‑negative quantities. This rounding rule applies to every division in normative pathways unless otherwise stated.
+
+**Implementation warning – anti‑pattern:**  
+Implementations **MUST NOT** substitute the common C idiom `(val + 50) / 100` for rounding division by 100, as that implements round‑half‑up and will produce non‑conforming results on exact `.50` ties.  The division must strictly follow the half‑to‑even algorithm above.  The following C snippet shows a correct implementation:
+
+```c
+// Correct half‑to‑even division by 100
+u128 prod = (u128)val;
+u128 q    = prod / 100;
+u128 r    = prod % 100;
+if (r > 50 || (r == 50 && (q & 1) != 0)) {
+    q += 1;
+}
+```
 
 #### 4.5.2 Integer Square Root with Rounding
 
@@ -613,7 +632,7 @@ Every time a resonance map is successfully produced, the runtime **shall** also 
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `gunz_version` | string | `"3.9.8"` |
+| `gunz_version` | string | `"3.9.9"` |
 | `map_fingerprint` | string | XXH3‑128 fingerprint (32 hex digits, lowercase) |
 | `creation_timestamp` | string | ISO 8601 UTC with millisecond precision |
 | `session_id` | string or null | A unique identifier for the exploration session. For canonical maps this must be a non‑null string; for non‑canonical (e.g., unsandboxed) maps it should be `null`. |
@@ -700,7 +719,8 @@ Optional compressed version of `.gunzstats` using delta encoding with run‑leng
 A compliant implementation must:
 
 **Evaluator arithmetic:**
-- Use the corrected `N_hi` formula (`N_hi = Q − N*d_lo` with `Q = R / quantum`), and mark candidates with `FLAG_AVOID` if `N_hi` falls outside `[0, N]`.
+- Use the corrected `N_hi` formula (`N_hi = Q − N*d_lo_cont` with `Q = R / quantum`), and mark candidates with `FLAG_AVOID` if `N_hi` falls outside `[0, N]`.
+- Use the continuous deltas `d_lo_cont`, `d_hi_cont` for determining `N` and `N_hi`; apply explicit delta overrides only to the block‑time sum.
 - Use 64‑bit division for `T`; 128‑bit intermediates where required; 128‑bit numerator for `T` when `time_unit ≥ 10`.
 - Precompute `N_max` only when deltas are invariant.
 - Apply the `time_unit`‑dependent stability‑width tolerance as specified in §3.11 Phase 2.
@@ -717,7 +737,7 @@ A compliant implementation must:
 - Set `map_version = 0x0006` in the map header.
 - Set `jitter_window_radius = 0` and `ppm_drift_scalar = 0` in the map header.
 - Use the aligned entry layout (offsets as in §4.2) for all generated maps.
-- Use the normative `JOIN` merge semantics (maximum of jitter metrics, minimum of stability width) as defined in §2.3.1.
+- Use the normative `JOIN` merge semantics (maximum of jitter metrics, minimum of stability width) and require identical `base_fps` and `step_fps` for joined maps.
 
 **Detrimental mode:**
 - Convert motion jitter to the base time unit before comparing to `detrimental_threshold`.
@@ -801,7 +821,7 @@ This specification defines the architectural contract. Future revisions will pre
 
 ---
 
-## Appendix B — Example: Decoding a GUNZ 3.9.8 Resonance Map
+## Appendix B — Example: Decoding a GUNZ 3.9.9 Resonance Map
 
 *(Example hex dump and decoding reflect the aligned entry layout.  The map header includes `map_version=0x0006`, `jitter_window_radius=0`, and `ppm_drift_scalar=0`.  The entry fields are ordered as described in §4.2, with `flags` at offset 9 and `motion_jitter` at offset 10.  Bit 0 of `flags` indicates stability width saturation.)*
 
@@ -845,4 +865,4 @@ Resonance reveals truth. A discrete‑clock system’s behaviour is determined e
 
 ---
 
-*GUNZ 3.9.8 — Gamified Underlying Navigation Zones — specification complete.*
+*GUNZ 3.9.9 — Gamified Underlying Navigation Zones — specification complete.*
