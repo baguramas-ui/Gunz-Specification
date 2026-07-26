@@ -1,0 +1,48 @@
+## A Beginner’s Guide to GUNZ 3.15.0
+
+### What is GUNZ?
+
+GUNZ (Gamified Underlying Navigation Zones) is a deterministic tool for finding the best operating frequencies of any system that advances in fixed clock steps. Think of a game engine ticking 4,800 times per second, a hardware timer, or any process where time is measured in whole numbers of a base unit (nanoseconds, microseconds, etc.). GUNZ scans a range of frequencies, simulates exactly how many ticks are needed to reach a target, and produces a compact **resonance map** that tells you where the timing is stable, where it jitters, and which frequencies to avoid.
+
+### Why use GUNZ?
+
+- **It is deterministic.** The same inputs always produce exactly the same map, on any machine. Share a scan with confidence.
+- **It works at any time scale.** From seconds to picoseconds, just set the `time_unit` (0=seconds, 3=milliseconds, 6=microseconds, 9=nanoseconds, 12=picoseconds).
+- **It is built for automation.** Deterministic output and companion metadata (`.gunzmeta`) let AI agents compare scans, adjust parameters, and resume work without human help.
+- **It stores everything needed to reproduce a scan.** Metadata captures the exact parameters, zones, and scan cost—so you (or an AI) can re‑run the same analysis years later.
+- **It can measure language‑model consistency.** Because a fixed prompt behaves like a discrete‑clock system, GUNZ can, in principle, measure how stably a language model answers the same question across many runs. This is an emerging application; the mathematics supports it, but reference tooling is still under development.
+
+### What does GUNZ produce?
+
+When GUNZ scans a frequency range, it creates:
+
+- A **`.gunzmap`** file – a small binary table (16 bytes per entry) that maps every FPS step to its timing accuracy, jitter, motion jitter, stability width, and flags (e.g., “avoid this region”).
+- A **`.gunzmeta`** file – a human‑readable JSON sidecar with scan settings, timestamps, and a quality summary.
+- Optionally, a **`.gunzstats`** or **`.gunzstatz`** file – raw statistics for long‑term measurements that can be chained across hours or days without losing precision.
+
+### How do I use GUNZ?
+
+1. **Define your system.** Choose the clock quantum (smallest time step), the target tick count, the advance multiplier, and the hold/separation frames.
+2. **Choose a frequency range.** Decide which FPS interval to scan and how finely (the step size). A “playground” is just a start‑to‑end FPS range.
+3. **Run the scan.** A GUNZ runtime processes the zones and writes the map and metadata files.  
+   *(The GUNZ 3.15.0 specification is complete. A reference runtime and conformance test suite are under development. You can start with a minimal implementation—just the static lane, a zone evaluator, and map output—and be fully conformant.)*
+4. **Read the map.** The map shows which frequencies are sweet spots (low jitter, stable), which are detrimental (high jitter, flagged with `FLAG_AVOID`), and where there are large gaps.
+5. **Adjust and repeat.** Use `time_unit` to coarsen or refine the scan, tune the jitter window radius or jitter weight, and chain multiple maps with fingerprint links.  
+   Each scan is a **checkpoint**: the `.gunzmeta` records exactly which truth anchor and scan parameters were used, and can optionally link to the previous checkpoint via a fingerprint chain. This lets you explore without fear—if a new configuration makes things worse, reload the last good checkpoint (using the fingerprint link) and try a different path. Over many iterations, each map becomes the anchor for the next, and GUNZ turns from a one‑time scanner into a **truth‑seeking compass**.
+
+### What’s new in 3.15.0?
+
+- **Minimal Conformance Profile** – You can build a tiny, fully conformant scanner that only handles static zones and spits out a valid `.gunzmap`. No bytecode VM, no callbacks, no sandboxing required.
+- **Configurable Jitter Window & Weight** – The default 21‑point window (±0.1 FPS) and 4× jitter weight still work, but now you can adjust them to match your domain (e.g., tighter windows for ultra‑precise hardware, lighter weight for non‑interactive systems).
+- **Separate Detrimental Thresholds** – Jitter and motion jitter now have independent thresholds, so you can flag a region for excessive timing jitter without penalising mild motion jitter, or vice versa.
+- **Everything is Optional Until You Need It** – Dynamic orchestration, streaming, long‑term scans, sandboxed callbacks—all remain available, but they don’t burden a simple implementation.
+
+### Where do I learn more?
+
+- The full **GUNZ 3.15.0 specification** defines every field, formula, and conformance rule.
+- A companion **Philosophy & Origin** document (separate from the spec) explains the “why” behind GUNZ.
+- An **Implementation Guide** (forthcoming) will collect optimisation tips, example code, and GPU/SIMD strategies.
+
+---
+
+*That’s GUNZ in a nutshell: a clock‑domain resonance scanner that gives you a map of truth, one FPS at a time.*
