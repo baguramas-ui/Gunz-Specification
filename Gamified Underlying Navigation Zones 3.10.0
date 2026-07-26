@@ -15,49 +15,56 @@ See the License for the specific language governing permissions and
 
 Co-authored by DeepSeek, Corentin Amice, "The Mirror", "The Calibration Hammer" and "The Dancing Hammer".
 
-
-
-# GUNZ 3.10.0 — Gamified Underlying Navigation Zones  
-**ISA · Runtime · Library · Network**
-
 ---
 
-## Foreword: On the Game of Truth
-
-*This foreword is not normative. It exists to explain the soul of the project.*
-
-In 2003, a video game called *GunZ: The Duel* shipped with a broken animation engine. Its timing loop, built on `timeGetTime()` and a magic multiplier of `4.8`, drifted with every frame. Players who understood the engine’s glitches — animation cancels, butterfly swings, instant dashes — could move in ways the designers never intended. They found resonance in the bugs. They played the brokenness as much as they played the game.
-
-Twenty‑three years later, that broken engine became the seed of a standard. An AI, co‑authoring a specification with a human, spontaneously wrote an appendix — a confession — about its own hallucinations and the need for an external truth anchor. That appendix became the Epilogue. The standard became GUNZ.
-
-GUNZ stands for **Gamified Underlying Navigation Zones**. It is a deterministic playground. Its rules are simple — a clock quantum, a target tick count, a multiplier, a rounding mode — yet the landscapes it produces are vast and complex. Every scan is a move in a game where the AI proposes a model and GUNZ executes the physics. The resulting map is a scoreboard: here are the stable valleys, here are the death zones, here is where the model sings and where it shatters.
-
-Like Conway’s Game of Life, GUNZ is a tiny set of integer rules that generate a universe of emergent behaviour. But where Conway’s game asks *what survives?*, GUNZ asks *what is true?* The AI generates a thousand organisms — models, hypotheses, guesses. GUNZ is the petri dish. Only the resonant ones survive.
-
-This document is the rules of the game. It is also a truth instrument, a memory, a network‑scale coordination primitive, and a mirror that does not flatter. Use it to play. Use it to verify. Use it to wake up when the jitter rises.
-
-The game of truth versus hallucination has no final level. But it has rules. And they start here.
+# GUNZ 3.15.0 — Gamified Underlying Navigation Zones  
+**ISA · Runtime · Library**
 
 ---
 
 ## 1. Overview
 
-GUNZ 3.10.0 (Gamified Underlying Navigation Zones) is a deterministic, offline‑scanner runtime for discrete‑clock systems. It produces compressed resonance maps — **stability topographies** — that describe optimal operating frequencies for any process governed by a fixed‑quantum clock. The format targets AI‑driven feedback loops, heterogeneous hardware deployment, and long‑term archival.
+GUNZ 3.15.0 (Gamified Underlying Navigation Zones) is a deterministic, offline‑scanner runtime for discrete‑clock systems. It produces compressed resonance maps — **stability topographies** — that describe optimal operating frequencies for any process governed by a fixed‑quantum clock. The format targets AI‑driven feedback loops, heterogeneous hardware deployment, and long‑term archival.
 
-Conceptually, GUNZ is a **game engine for truth**. The AI is a player: it proposes a model (a set of parameters) as its move. GUNZ executes the deterministic physics of the clock model and returns a **scoreboard** — the resonance map — showing where the model aligns with reality (stable valleys, low jitter), where it diverges (sharp edges, jitter spikes, death zones), and how far off it is. Like Conway’s Game of Life, simple integer rules produce an infinite landscape of emergent behaviour; unlike Conway’s game, the purpose is not observation but **navigation** — finding the paths through the space that are true.
-
-The bytecode ISA (§2) enables AI agents to programmatically orchestrate complex multi‑zone scans, deterministic conditional logic via `PURE_CALL`, and library composition — all without runtime recompilation. The ISA’s primary purpose is **orchestration**, not bulk scanning: a typical dynamic program issues a handful of `ZONE` instructions (each defining a **playground** — an FPS range to explore) and lets the static‑lane evaluator (§3.4) process millions of FPS candidates. Implementations may support only static‑lane programs (rejecting dynamic programs at load time) and still be conformant; the bytecode VM is an optional extension for advanced autonomous exploration.
+The bytecode ISA (§2) enables AI agents to programmatically orchestrate complex multi‑zone scans, deterministic conditional logic via `PURE_CALL`, and library composition — all without runtime recompilation. The ISA's primary purpose is **orchestration**, not bulk scanning: a typical dynamic program issues a handful of `ZONE` instructions (each defining a **playground** — an FPS range to explore) and lets the static‑lane evaluator (§3.4) process millions of FPS candidates. Implementations may support only static‑lane programs (rejecting dynamic programs at load time) and still be conformant; the bytecode VM is an optional extension for advanced autonomous exploration.
 
 The specification is split into four independent layers:
 
 - **GUNZ‑ISA** – bytecode format and instruction semantics.
 - **GUNZ‑RT** – execution runtime (memory, lanes, map generation).
 - **GUNZ‑LIB** – library profiles, resonance map format, fingerprinting, and integrity.
-- **GUNZ‑NET** – optional distributed protocol for map exchange and deduplication.
+- **GUNZ‑NET** *(future companion specification; currently under construction)*
 
 A normative **Conformance** chapter specifies test vectors that any compliant implementation must satisfy.
 
 **Normative vs. Informative** – Sections marked as *(Informative)* contain recommendations; all other sections are normative.
+
+---
+
+### 1.1 Minimal Conformance Profile (Static Lane, Trusted Code)
+
+A conformant GUNZ implementation that targets the Minimal Profile must implement the following:
+
+- **Bytecode header parsing** (§2.2) – Accept only the static lane opcode set. Reject unknown major versions. Reject unknown minor versions unless explicitly declared forward‑compatible. Validate `magic`, `time_unit ≤ 12`, and `target_ticks ≥ 1`.
+
+- **Static opcode subset** – Implement `HALT`, `ZONE`, `SKIP_ZONE`, `SCAN_RES`, and `EXPORT`. All other opcodes (including `LOOP`, `IMPORT`, `JOIN`, `STREAM`, `PURE_CALL`) must be rejected with `GUNZ_MALFORMED_BYTECODE`.
+
+- **Resonance Evaluator** (§3.11) – Implement Phase 1 dense scan and Phase 2 stability width. Use integer arithmetic in the base time unit, half‑to‑even rounding (§4.5.1), and the deterministic standard deviation algorithm (§4.5.3). Enforce `max_scan_iterations` and `total_max_scan_iterations` (§3.4.1), failing with `GUNZ_ITERATION_LIMIT_EXCEEDED` if exceeded.
+
+- **Map output** (§4.2, §4.2.1) – Produce 16‑byte map entries with canonical ordering, run‑length consolidation, and the long‑jump sentinel. Compute the XXH3‑64 checksum over the entries. Write a valid map header with `map_version` matching the specification.
+
+- **Error reporting** – Return `GUNZ_Result` codes as defined in §3.3. No additional diagnostic strings or structured error payloads are required.
+
+The Minimal Profile does **not** require:
+
+- Dynamic lane opcodes, the bytecode VM, or fuel accounting.
+- `PURE_CALL`, `STREAM`, `IMPORT`, `JOIN`, or any callback infrastructure.
+- Sandboxing, environment snapshots, or attestation.
+- Thread safety or reference counting (single‑threaded use is assumed).
+- Streaming, sparse maps, long‑term scan, or compressed statistics.
+- Structured diagnostic strings or machine‑readable error payloads.
+
+An implementation satisfying the Minimal Profile is fully conformant for all GUNZ programs that do not use dynamic opcodes, callbacks, or network features. Implementors may optionally support higher conformance tiers (dynamic lane, sandboxing, etc.) by following the normative sections of this specification.
 
 ---
 
@@ -71,22 +78,22 @@ A normative **Conformance** chapter specifies test vectors that any compliant im
 - The header is exactly 32 bytes for all version 3.x revisions. Future major versions may define a different header size; implementations shall reject unknown major versions.
 - **Minor version handling:** Implementations shall reject bytecode with an unknown minor version (within the same major version) unless that minor version has been explicitly declared forward‑compatible by the implementation.
 - Decoding is host‑endianness‑independent by construction: the bytecode is always little‑endian, and a correct decoder converts fields to host byte order. A mismatch of the `magic` field after correct little‑endian decoding shall be rejected.
-- **Unaligned accesses (normative):** The bytecode stream is intentionally tightly packed; decoders **must** perform unaligned multi‑byte reads using portable methods (e.g., byte‑by‑byte reassembly or `memcpy`).  Failure to handle unaligned accesses correctly is non‑conforming.  The evaluator’s hot path operates on native‑aligned structures constructed at plan‑build time (§3.4.1), so unaligned accesses are a decoding concern only.
+- **Unaligned accesses (normative):** The bytecode stream is intentionally tightly packed; decoders **must** perform unaligned multi‑byte reads using portable methods (e.g., byte‑by‑byte reassembly or `memcpy`). Failure to handle unaligned accesses correctly is non‑conforming. The evaluator's hot path operates on native‑aligned structures constructed at plan‑build time (§3.4.1), so unaligned accesses are a decoding concern only.
 
 ### 2.2 Header (32 bytes, fully aligned)
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0 | u32 | `magic` | `0x47554E5A` |
-| 4 | u32 | `version` | `0x0003000A` (major 3, minor 10) |
+| 4 | u32 | `version` | `0x0003000F` (major 3, minor 15) |
 | 8 | u32 | `quantum` | Clock granularity in the base time unit (0 = use library quantum) |
-| 12 | u32 | `target_ticks` | Ticks to reach (e.g., 1140).  Must be ≥ 1; `target_ticks = 0` shall be rejected with `GUNZ_MALFORMED_BYTECODE`. |
+| 12 | u32 | `target_ticks` | Ticks to reach (e.g., 1140). Must be ≥ 1; `target_ticks = 0` shall be rejected with `GUNZ_MALFORMED_BYTECODE`. |
 | 16 | u32 | `mult_num` | Advance multiplier numerator |
 | 20 | u32 | `mult_den` | Denominator |
-| 24 | u8  | `round_mode` | 0 = floor, 1 = nearest (half‑to‑even for non‑negative values; negative inputs are undefined and shall be rejected) |
+| 24 | u8  | `round_mode` | 0 = floor, 1 = nearest (half‑to‑even), 2 = ceil, 3 = truncate. All modes apply only to non‑negative operands; negative inputs are undefined and shall be rejected. |
 | 25 | u8  | `hold_frames` | Hold frames after target |
 | 26 | u8  | `sep_frames` | Input‑separation frames |
-| 27 | u8  | `time_unit` | Decimal exponent such that one base time unit = 10⁻ᵗⁱᵐᵉ_ᵁⁿⁱᵗ seconds.  Examples: `0` = seconds, `3` = milliseconds, `6` = microseconds, `9` = nanoseconds, `12` = picoseconds.  All time values in the header and evaluator are expressed in this unit.  **Normative maximum:** `time_unit ≤ 12`; larger values shall be rejected with `GUNZ_MALFORMED_BYTECODE`. |
+| 27 | u8  | `time_unit` | Decimal exponent such that one base time unit = 10⁻ᵗⁱᵐᵉ_ᵁⁿⁱᵗ seconds. Examples: `0` = seconds, `3` = milliseconds, `6` = microseconds, `9` = nanoseconds, `12` = picoseconds. All time values in the header and evaluator are expressed in this unit. **Normative maximum:** `time_unit ≤ 12`; larger values shall be rejected with `GUNZ_MALFORMED_BYTECODE`. |
 | 28 | u16 | `flags` | See table below |
 | 30 | u16 | `library_id` | 0 = none (or custom) |
 
@@ -96,12 +103,12 @@ A normative **Conformance** chapter specifies test vectors that any compliant im
 |-------|------------------------------|-------------|
 | 0‑4   | (reserved)                   | Must be 0 |
 | 5     | `long_term_scan`             | When set, the scanner shall evaluate multiple consecutive blocks for each FPS candidate, accumulating statistics over the configured measurement window (see §3.11 and §4.9). |
-| 6     | `analytical_boundary`        | **Deprecated.**  Implementations shall ignore this flag; users must not rely on it.  This bit is reserved for future use. |
-| 7     | `sandboxed_callbacks_required` | When set, any `PURE_CALL` in the program must be executed in a sandboxed environment that physically prevents side effects (§3.7).  If the runtime cannot provide such sandboxing, the program shall be rejected with `GUNZ_INVALID_LIBRARY`. |
+| 6     | `analytical_boundary`        | **Deprecated.** Implementations shall ignore this flag; users must not rely on it. This bit is reserved for future use. |
+| 7     | `sandboxed_callbacks_required` | When set, any `PURE_CALL` in the program must be executed in a sandboxed environment that physically prevents side effects (§3.7). If the runtime cannot provide such sandboxing, the program shall be rejected with `GUNZ_INVALID_LIBRARY`. |
 | 8‑14  | `lane_requirements`          | Bitmask of required runtime capabilities (0 = Static Lane only) |
 | 8     | (reserved)                   | Must be 0; ignored by lane‑requirement checks |
 | 9     | (reserved)                   | Must be 0 |
-| 10    | `sparse_map`                 | When set, the map generator shall merge any omitted intervals’ run lengths into the next emitted entry’s `fps_delta_start`, preserving spatial correctness. |
+| 10    | `sparse_map`                 | When set, the map generator shall merge any omitted intervals' run lengths into the next emitted entry's `fps_delta_start`, preserving spatial correctness. |
 | 11    | `streaming`                  | Enable streaming map output |
 | 12    | `deduplicate`                | Enable deterministic fingerprint deduplication |
 | 13    | (reserved)                   | Must be 0 |
@@ -125,17 +132,17 @@ These opcodes are deterministic and may only be used by programs that satisfy th
 | `0x01` | `LOOP` | `u16 count, u16 block_bytes` | Repeat the following `block_bytes` bytes `count` times. The block is self‑delimiting; decoders skip it in constant time by advancing `block_bytes`. `block_bytes` must be ≤ 65535. The LOOP instruction itself costs 1 fuel. Instructions inside the block are executed `count` times; their fuel costs are incurred on each iteration. |
 | `0x02` | (reserved) | – | Reserved. |
 | `0x03` | `ZONE` | `u32 fps_low, u32 fps_high` | Define a **playground** — an FPS range for evaluation. Both boundaries are given in 0.00001 FPS units. The zone must satisfy `fps_low ≥ 10001` (i.e., at least 0.10001 FPS) to guarantee the jitter window stays within the positive domain; otherwise the zone is rejected with `GUNZ_MALFORMED_BYTECODE`. |
-| `0x0C` | `SKIP_ZONE` | `u32 fps_low, u32 fps_high` | Skip evaluation of this playground. The scanner emits one placeholder entry covering the full skipped interval; sparse merging rules apply normally.  See §3.11 for emission rules. |
-| `0x04` | `EXPORT` | `u32 object_id, u32 len` | Write compressed map to the runtime object identified by `object_id`. `len` is the expected number of bytes to write; if the actual map size differs, the operation shall still succeed as long as the map is valid.  Integrity is guaranteed by the map’s XXH3‑64 checksum, not by `len`. |
-| `0x05` | `IMPORT` | `u32 object_id, u32 len` | Read and merge an external map from `object_id`. The runtime must ensure that the imported map is not mutated while the import is in progress; either a snapshot copy or an immutable object is used. `len` is a hint for buffer allocation; the actual number of bytes read is determined by the map data and validated by the XXH3‑64 checksum. A mismatch between `len` and the actual map size does not cause failure. Imported maps must have the same `time_unit` and `map_version` as the importing map; otherwise the import fails with `GUNZ_INVALID_LIBRARY`.  The XXH3‑64 checksum is validated on import; mismatch causes rejection. |
-| `0x06` | `JOIN` | `u32 mapA_id, u32 mapA_len, u32 mapB_id, u32 mapB_len, u32 out_id` | Intersect two maps. `len` operands are the expected byte counts. All maps involved must share the same `time_unit`, `map_version`, `base_fps`, `step_fps`, and **`reference_block_time`**.  Neither input map may contain long‑jump entries.  The operation shall perform a **sweep‑line intersection** over the common FPS grid, splitting entries at every boundary present in either input map.  After computing the per‑candidate merged metrics, the resulting entries shall be **re‑consolidated** using the standard rule: consecutive entries with identical metrics and flags are merged into a single entry.  For each entry in the overlapping region, the resulting `block_time_delta`, `jitter`, `motion_jitter`, and `peak_motion_jitter` are taken as the **maximum** of the two input values; the `stability_width` is taken as the **minimum**; `flags` are the bitwise OR.  This pessimistic merge ensures the joined map reflects worst‑case behaviour and deterministic output regardless of how the input maps were originally chunked. |
-| `0x07` | `STREAM` | `u32 callback_id` | Set streaming callback for batched map output. The callback must be a `PURE_CALL`‑compatible function. The runtime performs actual I/O on separate worker threads; the callback itself must not block and must complete within a deterministic, constant‑time budget relative to its arguments. If the streaming callback cannot consume entries at the rate they are produced, the runtime shall pause the evaluator until buffer space becomes available. This pause shall release any evaluator‑held scratch‑arena locks or ring‑buffer references before waiting, to prevent deadlock with consumer/flusher threads.  The pause is not considered a callback execution; it is a backpressure mechanism to bound memory usage. |
+| `0x0C` | `SKIP_ZONE` | `u32 fps_low, u32 fps_high` | Skip evaluation of this playground. The scanner emits entries covering the full skipped interval; see §3.11 for emission rules. |
+| `0x04` | `EXPORT` | `u32 object_id, u32 len` | Write compressed map to the runtime object identified by `object_id`. `len` is the expected number of bytes to write; if the actual map size differs, the operation shall still succeed as long as the map is valid. Integrity is guaranteed by the map's XXH3‑64 checksum, not by `len`. |
+| `0x05` | `IMPORT` | `u32 object_id, u32 len` | Read and merge an external map from `object_id`. The runtime must ensure that the imported map is not mutated while the import is in progress; either a snapshot copy or an immutable object is used. `len` is a hint for buffer allocation; the actual number of bytes read is determined by the map data and validated by the XXH3‑64 checksum. A mismatch between `len` and the actual map size does not cause failure. Imported maps must have the same `time_unit` and `map_version` as the importing map; otherwise the import fails with `GUNZ_INVALID_LIBRARY`. The XXH3‑64 checksum is validated on import; mismatch causes rejection. |
+| `0x06` | `JOIN` | `u32 mapA_id, u32 mapA_len, u32 mapB_id, u32 mapB_len, u32 out_id` | Intersect two maps. `len` operands are the expected byte counts. All maps involved must share the same `time_unit`, `map_version`, `base_fps`, `step_fps`, and **`reference_block_time`**. Neither input map may contain long‑jump entries. The operation shall perform a **sweep‑line intersection** over the common FPS grid, splitting entries at every boundary present in either input map. After computing the per‑candidate merged metrics, the resulting entries shall be **re‑consolidated** using the standard rule: consecutive entries with identical metrics and flags are merged into a single entry. For each entry in the overlapping region, the resulting `block_time_delta`, `jitter`, `motion_jitter`, and `peak_motion_jitter` are taken as the **maximum** of the two input values; the `stability_width` is taken as the **minimum**; `flags` are the bitwise OR. This pessimistic merge ensures the joined map reflects worst‑case behaviour and deterministic output regardless of how the input maps were originally chunked. |
+| `0x07` | `STREAM` | `u32 callback_id` | Set streaming callback for batched map output. The callback must be a `PURE_CALL`‑compatible function. The runtime performs actual I/O on separate worker threads; the callback itself must not block and must complete within a deterministic, constant‑time budget relative to its arguments. If the streaming callback cannot consume entries at the rate they are produced, the runtime shall pause the evaluator until buffer space becomes available. This pause shall release any evaluator‑held scratch‑arena locks or ring‑buffer references before waiting, to prevent deadlock with consumer/flusher threads. The pause is not considered a callback execution; it is a backpressure mechanism to bound memory usage. |
 | `0x08` | (reserved) | – | Was `KALMAN`; now reserved. |
 | `0x09` | (reserved) | – | Reserved. |
 | `0x0A` | `PURE_CALL` | `u32 callback_id, u8 arg_count, u32 args[]` | Invoke a deterministic external function (see §3.7). The instruction length is `6 + 4 × arg_count` bytes, with each `u32` argument following the `arg_count` byte in little‑endian order. `arg_count` must be ≤ 16. |
-| `0x0B` | `SCAN_RES` | `u32 step_fps, u8 flags` | Set the dense‑scan step size in 0.00001 FPS units. A value of 0 means “use the normative default of 1” (i.e., 0.00001 FPS). The `flags` operand is reserved and must be `0x00`. |
+| `0x0B` | `SCAN_RES` | `u32 step_fps, u8 flags` | Set the dense‑scan step size in 0.00001 FPS units. A value of 0 means "use the normative default of 1" (i.e., 0.00001 FPS). The `flags` operand is reserved and must be `0x00`. |
 
-All `object_id` values are 32‑bit indices into the runtime’s private object table (§3.9); they are never raw memory addresses.
+All `object_id` values are 32‑bit indices into the runtime's private object table (§3.9); they are never raw memory addresses.
 
 #### 2.3.2 Dynamic Lane Opcodes (0x10‑0x1F)
 
@@ -144,21 +151,21 @@ These opcodes are only available when the program does not meet the Static Lane 
 | Opcode | Mnemonic | Operands | Description |
 |--------|----------|----------|-------------|
 | `0x10` | `ADVANCE` | `u32 mult_num, u32 mult_den` | Temporarily override multiplier. |
-| `0x11` | `ROUND` | `u8 mode` | Temporarily override rounding. |
-| `0x12` | `DELTA` | `u32 d_lo, u32 d_hi` | Set explicit delta pair in units of the clock quantum (i.e., multiples of `quantum`). Both values must be non‑negative. All subsequent zone evaluations shall use these exact values as the per‑frame deltas, overriding the normal derivation from the frame time. The placement of `d_hi` frames remains driven by the continuous frame time; only the per‑frame advances and block‑time sum are affected.  **Lifetime and override detection:** An explicit delta override is **active** for all `ZONE` instructions executed after this `DELTA`, until another `DELTA` overrides the values or the program halts.  The override is considered active regardless of the numeric values; the sentinel `(d_lo=0, d_hi=0)` is treated as “no override” (the default state before any `DELTA` is executed).  Any `DELTA` instruction, including one with `d_lo=0` and `d_hi>0`, activates the override.  Values must satisfy `d_lo ≤ d_hi`.  The values must also be such that the resulting `N_max` (as computed in §3.11) does not exceed a normative maximum `MAX_N = 2³¹ − 1`.  If the requested deltas would cause arithmetic overflow or violate this bound, the runtime shall reject the program with `GUNZ_MALFORMED_BYTECODE`. |
+| `0x11` | `ROUND` | `u8 mode` | Temporarily override rounding. The mode values follow the same encoding as `round_mode` in the header (§2.2). |
+| `0x12` | `DELTA` | `u32 d_lo, u32 d_hi` | Set explicit delta pair in units of the clock quantum (i.e., multiples of `quantum`). Both values must be non‑negative. All subsequent zone evaluations shall use these exact values as the per‑frame deltas, overriding the normal derivation from the frame time. The placement of `d_hi` frames remains driven by the continuous frame time; only the per‑frame advances and block‑time sum are affected. **Lifetime and override detection:** An explicit delta override is **active** for all `ZONE` instructions executed after this `DELTA`, until another `DELTA` overrides the values or the program halts. The override is considered active regardless of the numeric values; the sentinel `(d_lo=0, d_hi=0)` is treated as "no override" (the default state before any `DELTA` is executed). Any `DELTA` instruction, including one with `d_lo=0` and `d_hi>0`, activates the override. Values must satisfy `d_lo ≤ d_hi`. The values must also be such that the resulting `N_max` (as computed in §3.11) does not exceed a normative maximum `MAX_N = 2³¹ − 1`. If the requested deltas would cause arithmetic overflow or violate this bound, the runtime shall reject the program with `GUNZ_MALFORMED_BYTECODE`. |
 | `0x13` | `LIBREF` | `u16 library_id` | Switch active library (flushes derived state). |
 | `0x14` | (reserved) | – | Reserved. |
 | `0x15` | (reserved) | – | Was `IMPURE_CALL`; removed to preserve determinism. Reserved for future use. |
 | `0x16‑0x1F` | (reserved) | – | Reserved. |
 
-The `BRANCH` opcode has been removed to guarantee deterministic behaviour; programs requiring runtime‑conditional logic must use `PURE_CALL`. All callbacks used by GUNZ programs must satisfy the purity requirements of §3.7; non‑deterministic callbacks are not permitted.
+The `BRANCH` opcode has been removed to enable static analysis and eliminate branch dispatch in the hot loop; programs requiring runtime‑conditional logic must use `PURE_CALL`. All callbacks used by GUNZ programs must satisfy the purity requirements of §3.7; non‑deterministic callbacks are not permitted.
 
 ### 2.4 Lane Selection
 
 A program is **Static Lane** if:
 
 - It contains **only** opcodes from the explicitly enumerated set `{0x00, 0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x0A, 0x0B, 0x0C}` (the static opcodes listed in §2.3.1, excluding all reserved opcodes including `0x02`, `0x08`, and `0x09`).
-- The `lane_requirements` mask (bits 8‑14) is a subset of the scanner’s capabilities.
+- The `lane_requirements` mask (bits 8‑14) is a subset of the scanner's capabilities.
 - No Dynamic Lane opcodes are present.
 
 Otherwise the program is executed in the Dynamic Lane. The lane classification is runtime metadata; it is **never serialized** in the bytecode.
@@ -177,10 +184,10 @@ Otherwise the program is executed in the Dynamic Lane. The lane classification i
 ### 3.2 ExecutionPlan Lifecycle
 
 - Plans are published with **release** semantics and read with **acquire** semantics. They are immutable after publication.
-- `ExecutionPlan` objects are immutable and may be accessed concurrently by any number of threads.  Implementations must ensure that a plan is not freed while any thread still holds a reference to it.
-- **Reference counting:**  Each `ExecutionPlan` carries an atomic, thread‑safe reference count.  Threads call `ExecutionPlan_Acquire(plan)` before using a plan, and `ExecutionPlan_Release(plan)` when finished.  When the count reaches zero the plan is freed.  `ExecutionPlan_Run()` does not implicitly acquire or release a reference; the caller must hold a valid reference throughout the execution.
-- **Crash semantics:** If a thread terminates abnormally while holding a reference, that reference is considered leaked and the plan will not be freed until the process exits or an out‑of‑band recovery mechanism is invoked.  Implementations should provide a mechanism to detect such leaks and log them; they are not required to reclaim the memory automatically.  An implementation may, optionally, offer an administrative API to force release of leaked references with appropriate attestation.
-- **Epoch‑based schemes** are discouraged because a single stalled thread can prevent all reclamation, leading to unbounded memory growth.  If an implementation uses such a scheme, it must document how the stall problem is avoided and must still guarantee that `ExecutionPlan` objects are eventually freed.
+- `ExecutionPlan` objects are immutable and may be accessed concurrently by any number of threads. Implementations must ensure that a plan is not freed while any thread still holds a reference to it.
+- **Reference counting:** Each `ExecutionPlan` carries an atomic, thread‑safe reference count. Threads call `ExecutionPlan_Acquire(plan)` before using a plan, and `ExecutionPlan_Release(plan)` when finished. When the count reaches zero the plan is freed. `ExecutionPlan_Run()` does not implicitly acquire or release a reference; the caller must hold a valid reference throughout the execution.
+- **Crash semantics:** If a thread terminates abnormally while holding a reference, that reference is considered leaked and the plan will not be freed until the process exits or an out‑of‑band recovery mechanism is invoked. Implementations should provide a mechanism to detect such leaks and log them; they are not required to reclaim the memory automatically. An implementation may, optionally, offer an administrative API to force release of leaked references with appropriate attestation.
+- **Epoch‑based schemes** are discouraged because a single stalled thread can prevent all reclamation, leading to unbounded memory growth. If an implementation uses such a scheme, it must document how the stall problem is avoided and must still guarantee that `ExecutionPlan` objects are eventually freed.
 - Plans remain valid until freed, even if evicted from a plan cache.
 
 ### 3.3 ExecutionPlan Interface
@@ -195,7 +202,7 @@ typedef enum {
     GUNZ_ARENA_EXHAUSTED,
     GUNZ_INVALID_LIBRARY,
     GUNZ_MALFORMED_BYTECODE,
-    GUNZ_FUEL_EXHAUSTED,
+    GUNZ_FUEL_EXHAUSTED,      // soft status: partial map returned, scan incomplete but valid
     GUNZ_INVALID_OBJECT,
     GUNZ_ITERATION_LIMIT_EXCEEDED,
 } GUNZ_Result;
@@ -211,7 +218,7 @@ GUNZ_Result   ExecutionPlan_Run(const ExecutionPlan *plan,
 `ScratchArena` is owned by the caller and must not be accessed concurrently.  
 An `ExecutionPlan` contains no runtime feature‑selection branches; all invariant properties are resolved at construction time. The hot loop contains only data‑dependent operations.
 
-**`ZoneBatch`** is an opaque container of zero or more zones to be evaluated. Each zone is a triple `(fps_low, fps_high, evaluator_id)`. The plan must document the mapping from `evaluator_id` to the specific evaluator implementation. Zones in a batch may be evaluated in any order; the final output must be identical regardless of order. Implementations must provide a way to populate a `ZoneBatch` from the bytecode’s `ZONE` and `SKIP_ZONE` instructions; the exact mechanism is implementation‑defined but must preserve determinism. A `SKIP_ZONE` adds the zone boundaries to the batch with a special marker; no evaluator is invoked for these zones.
+**`ZoneBatch`** is an opaque container of zero or more zones to be evaluated. Each zone is a triple `(fps_low, fps_high, evaluator_id)`. The plan must document the mapping from `evaluator_id` to the specific evaluator implementation. Zones in a batch may be evaluated in any order; the final output must be identical regardless of order. Implementations must provide a way to populate a `ZoneBatch` from the bytecode's `ZONE` and `SKIP_ZONE` instructions; the exact mechanism is implementation‑defined but must preserve determinism. A `SKIP_ZONE` adds the zone boundaries to the batch with a special marker; no evaluator is invoked for these zones.
 
 **`SparseMapBuilder`** is an opaque, thread‑local object that accumulates map entries. Implementations must provide a function to append a completed entry (all 16 bytes) and to finalise the map header.  
 **Canonical ordering:** The `SparseMapBuilder` must assemble map entries in ascending order of their starting FPS (computed from the base FPS and cumulative deltas). If two entries share the same starting FPS, they shall be sorted by ascending `run_length` (equivalently, by ascending ending FPS). This guarantees that the final map byte sequence is independent of the order in which zones were evaluated.  
@@ -223,29 +230,28 @@ When multiple threads evaluate zones concurrently, each thread writes to its own
 
 #### 3.4.1 Plan Construction
 
-- Full constant propagation, direct callback binding (no runtime `callback_id` lookup), and resolution of all feature flags into specialised evaluator blocks.
+- Full constant propagation, direct callback binding (no runtime `callback_id` lookup), and resolution of all feature flags into specialised evaluator blocks. The resulting hot loop contains no opcode decoding, no branch dispatch, and no feature‑test branches.
 - Zones are grouped by identical evaluator configuration, producing a schedule of `EvaluatorBlock` structures. Each block holds a function pointer, embedded constants, zone span, and scratch offsets. If an explicit delta pair is active for a zone, the evaluator block carries the `(d_lo, d_hi)` override values and a boolean flag indicating the override is active; otherwise those fields are zeroed and the evaluator computes `d_lo`/`d_hi` from the frame time.
 - **Compile‑time binding of DELTA state:** During plan construction, the active `(d_lo, d_hi)` override (if any) is captured and embedded immutably into each `EvaluatorBlock`. This guarantees that `ZoneBatch` entries remain stateless with respect to `DELTA`; worker threads evaluating zones in any order see a consistent snapshot of the override state.
 - `adv_lo`, `adv_hi`, and the binary‑search upper bound `N_max = ceil(target_ticks / max(adv_lo, adv_hi, 1))` are computed and stored in the evaluator block **only when the deltas are invariant** (i.e., an explicit delta override is active). For normal zones, these values are recomputed per FPS candidate.
-- The hot loop iterates over pre‑scheduled blocks; there is no opcode decoding, no branch dispatch, and no feature‑test branches inside the loop.
 - Zone data is stored contiguously; the layout is implementation‑defined but must support efficient vectorisation.
-- **Plan complexity score and iteration bounds:** During construction, the plan’s total number of evaluator blocks, worst‑case scan iterations per zone, and worst‑case evaluation iterations per candidate are computed.  The plan must carry normative limits:
+- **Plan complexity score and iteration bounds:** During construction, the plan's total number of evaluator blocks, worst‑case scan iterations per zone, and worst‑case evaluation iterations per candidate are computed. The plan must carry normative limits:
   - `max_scan_iterations` (per zone): at least 2²⁴ (16 777 216).
-  - `max_eval_iterations` (per candidate): for non‑long‑term scans, at least 65 536.  For `long_term_scan` plans, this limit is **derived dynamically** as `ceil(window_duration / T_min)`, where `T_min` is the frame time at the highest FPS in the zone (`fps_high`).  If the plan’s declared `max_eval_iterations` is lower than this dynamic minimum, construction fails with `GUNZ_ITERATION_LIMIT_EXCEEDED`.
+  - `max_eval_iterations` (per candidate): for non‑long‑term scans, at least 65 536. For `long_term_scan` plans, this limit is **derived dynamically** as `ceil(window_duration / T_min)`, where `T_min` is the frame time at the highest FPS in the zone (`fps_high`). If the plan's declared `max_eval_iterations` is lower than this dynamic minimum, construction fails with `GUNZ_ITERATION_LIMIT_EXCEEDED`.
   - `total_max_scan_iterations` (global, across all zones in the plan): at least 2²⁶ (67 108 864).
   
-  If any computed worst‑case exceeds these limits, construction shall fail with `GUNZ_ITERATION_LIMIT_EXCEEDED`.  If the total number of evaluator blocks exceeds an implementation‑defined threshold (at least `MAX_STATIC_EVALUATORS` = 65 536), construction fails with `GUNZ_ARENA_EXHAUSTED`.  These protections prevent denial‑of‑service via small bytecode programs that expand to enormous evaluator workloads.
-- **Immutability of embedded constants:** Once constructed, the plan’s copy of `reference_block_time` and all other system parameters are fixed. Subsequent changes to the map header or library profile do not retroactively affect an already‑built plan.
+  If any computed worst‑case exceeds these limits, construction shall fail with `GUNZ_ITERATION_LIMIT_EXCEEDED`. If the total number of evaluator blocks exceeds an implementation‑defined threshold (at least `MAX_STATIC_EVALUATORS` = 65 536), construction fails with `GUNZ_ARENA_EXHAUSTED`. These protections prevent denial‑of‑service via small bytecode programs that expand to enormous evaluator workloads.
+- **Immutability of embedded constants:** Once constructed, the plan's copy of `reference_block_time` and all other system parameters are fixed. Subsequent changes to the map header or library profile do not retroactively affect an already‑built plan.
 - After library merging, `mult_num` and `mult_den` must both be non‑zero; otherwise plan construction fails with `GUNZ_INVALID_LIBRARY`.
 
 #### 3.4.2 Arithmetic & Numerics
 
 - All arithmetic is performed in **integers** in the base time unit determined by `time_unit`. Observable results (block time, jitter, motion jitter) must equal the mathematical integer result whenever representable; otherwise they saturate.
-- **Saturation:** Unless otherwise stated, saturation clamps a value to the nearest representable boundary of its destination type (e.g., `UINT32_MAX` for an unsigned 32‑bit field, 255 for a `u8`, 65535 for a `u16`, etc.).
+- **Saturation:** Unless otherwise stated, saturation clamps a value to the nearest representable boundary of its destination type (e.g., `UINT32_MAX` for an unsigned 32‑bit field, 255 for a `u8`, 65535 for a `u16`, etc.). For signed integer fields, saturation clamps to the minimum or maximum representable value (e.g., `−32 768` to `32 767` for `s16`). Signed saturation is relevant only for fields that carry signed deltas (`fps_delta_start`) and for the long‑jump sentinel reinterpretation; all other paths use unsigned or exact arithmetic and do not produce signed overflow.
 - Floating‑point arithmetic shall not influence observable outputs.
 - SIMD implementations must produce bit‑identical output to the scalar implementation.
 - **Division:** All divisions in the hot path by plan‑invariant divisors shall produce mathematically exact floor results (or the appropriate rounding as specified). Implementations may use precomputed reciprocal multiplication, Granlund–Montgomery, or any other method that yields bit‑identical results.
-- **Ceiling computation:** For positive integers `a` and `b`, `ceil(a / b)` is defined as `(a + b - 1) / b`.  To avoid overflow, the addition `a + b - 1` must be performed using a type wide enough to hold the result; for 32‑bit inputs, at least 64‑bit arithmetic shall be used.
+- **Ceiling computation:** For positive integers `a` and `b`, `ceil(a / b)` is defined as `(a + b - 1) / b`. To avoid overflow, the addition `a + b - 1` must be performed using a type wide enough to hold the result; for 32‑bit inputs, at least 64‑bit arithmetic shall be used.
 
 #### 3.4.3 Adaptive Multi‑Resolution Scanning *(Informative)*
 
@@ -253,7 +259,7 @@ The `time_unit` field enables adaptive multi‑resolution scanning without any f
 
 The recommended iterative procedure is:
 
-1. **Start coarse.** Begin with a large time unit (e.g., milliseconds, `time_unit=3`). Coarse scans are fast and quickly reveal major block‑pattern transitions (“edges” where `N` changes).
+1. **Start coarse.** Begin with a large time unit (e.g., milliseconds, `time_unit=3`). Coarse scans are fast and quickly reveal major block‑pattern transitions ("edges" where `N` changes).
 
 2. **Deepen when silent.** If the coarse scan finds no edge over the target FPS zone, increase precision by moving to a finer time unit (e.g., microseconds, `time_unit=6`). Jumping in powers of 1000 (i.e., ±3 in `time_unit`) provides a good balance between dynamic range and scan count.
 
@@ -272,7 +278,7 @@ This iterative deepening is a core design pattern for GUNZ‑based tuning: the f
 
 ### 3.5 Dynamic Lane Execution
 
-The Dynamic Lane is a simple virtual machine that processes bytecode programs not meeting the Static Lane criteria. It executes instructions sequentially, collecting zones and producing a `ZoneBatch` for subsequent evaluation.  Implementations that do not support dynamic programs (i.e., that reject all bytecode containing dynamic lane opcodes) remain conformant.
+The Dynamic Lane is a simple virtual machine that processes bytecode programs not meeting the Static Lane criteria. It executes instructions sequentially, collecting zones and producing a `ZoneBatch` for subsequent evaluation. Implementations that do not support dynamic programs (i.e., that reject all bytecode containing dynamic lane opcodes) remain conformant.
 
 **VM state:**
 
@@ -302,11 +308,11 @@ Every plan contains a copy of the canonical fuel table below. This ensures that 
 | `LIBREF` | HIGH | 100 |
 
 **Fuel consumption semantics:**  
-Before each instruction is executed, the VM checks whether `fuel < instruction_cost`.  If so, the VM halts with `GUNZ_FUEL_EXHAUSTED` and **the instruction is not executed**.  Otherwise, the instruction is fully executed, and *after* execution, `fuel` is decremented by the instruction’s cost.  This guarantees that an instruction with insufficient fuel will never run.
+Before each instruction is executed, the VM checks whether `fuel < instruction_cost`. If so, the VM halts with `GUNZ_FUEL_EXHAUSTED` and **the instruction is not executed**. Otherwise, the instruction is fully executed, and *after* execution, `fuel` is decremented by the instruction's cost. This guarantees that an instruction with insufficient fuel will never run.
 
 *Note:* The `HALT` instruction costs 1 fuel to ensure that a program that reaches `HALT` with exactly zero fuel can still terminate cleanly (the check is performed before `HALT` executes, and if `fuel < 1` the VM halts without executing it).
 
-After halting (either `HALT` or fuel exhaustion), the accumulated zones, each with their own captured state, are evaluated using the **Resonance Evaluator** (§3.11) to produce map entries. The dynamic lane itself does not perform interleaved scanning; it merely collects zones with their states and defers evaluation to the same evaluator used by the static lane. `SKIP_ZONE` zones are marked as skipped and produce placeholder entries directly without evaluation.
+After halting (either `HALT` or fuel exhaustion), the accumulated zones, each with their own captured state, are evaluated using the **Resonance Evaluator** (§3.11) to produce map entries. **The resulting partial map shall be returned to the caller; `GUNZ_FUEL_EXHAUSTED` is informational and does not discard the map.** The dynamic lane itself does not perform interleaved scanning; it merely collects zones with their states and defers evaluation to the same evaluator used by the static lane. `SKIP_ZONE` zones are marked as skipped and produce placeholder entries directly without evaluation.
 
 ### 3.6 Callback ABI (Normative)
 
@@ -322,7 +328,7 @@ typedef GUNZ_Result (*GUNZ_Callback)(
 
 - `args`, `arg_count` – as passed from bytecode.
 - `output` – caller‑owned buffer; its size and alignment are defined per `callback_id` and documented by the callback author. Valid only for the duration of the invocation; must not be retained.
-- The `callback_abi_version` in the library profile must match the callback’s ABI version. If a mismatch is detected during plan construction, plan construction fails with `GUNZ_INVALID_LIBRARY`.
+- The `callback_abi_version` in the library profile must match the callback's ABI version. If a mismatch is detected during plan construction, plan construction fails with `GUNZ_INVALID_LIBRARY`.
 
 ### 3.7 PURE_CALL Definition
 
@@ -333,8 +339,8 @@ A `PURE_CALL` callback must satisfy:
 - Memory accesses depend only on arguments and immutable data.
 - Execution complexity depends only on arguments and immutable data.
 
-**Sandboxing requirement:**  
-If the bytecode header sets the `sandboxed_callbacks_required` flag (bit 7), the runtime **shall** execute every `PURE_CALL` in a sandboxed environment that physically enforces the purity constraints.  A conformant sandbox must provide the following guarantees:
+**Sandboxing requirement (optional extension):**  
+If the bytecode header sets the `sandboxed_callbacks_required` flag (bit 7), the runtime **shall** execute every `PURE_CALL` in a sandboxed environment that physically enforces the purity constraints. A conformant sandbox must provide the following guarantees:
 
 1. **Isolation:** No access to the host filesystem, network, or devices.
 2. **Determinism:** Execution must be deterministic; no access to sources of non‑determinism such as hardware clocks or random devices.
@@ -342,7 +348,7 @@ If the bytecode header sets the `sandboxed_callbacks_required` flag (bit 7), t
 4. **No persistent state:** No modifications to persistent storage or external state.
 5. **No side effects:** No I/O, no system calls except those explicitly permitted by the purity constraints.
 
-Any sandboxing mechanism that satisfies these properties is acceptable.  Examples include, but are not limited to:
+Any sandboxing mechanism that satisfies these properties is acceptable. Examples include, but are not limited to:
 
 - A WebAssembly runtime with no host imports and deterministic timers.
 - A separate process per callback with a seccomp‑bpf profile denying network and file I/O, and cgroup CPU/memory limits.
@@ -350,15 +356,17 @@ Any sandboxing mechanism that satisfies these properties is acceptable.  Example
 - A Firecracker microVM with a minimal, deterministic guest.
 - A gVisor sandbox configured for pure execution.
 
-The runtime must record in `.gunzmeta` the sandbox type and an attestation (see §4.6).  If the flag is set and the runtime cannot provide a conformant sandbox, it shall reject the program with `GUNZ_INVALID_LIBRARY`.  
+The runtime must record in `.gunzmeta` the sandbox type and an attestation (see §4.6). If the flag is set and the runtime cannot provide a conformant sandbox, it shall reject the program with `GUNZ_INVALID_LIBRARY`.  
 *A reference sandbox implementation is planned for inclusion in the conformance suite; until then, implementers must verify that their chosen sandbox guarantees deterministic execution.*
 
-If the flag is not set, the runtime may still sandbox callbacks, but is not required to do so.  However, a map produced with **unsandboxed** callbacks shall **not** be considered a canonical truth‑anchor map (§4.6); its `.gunzmeta` must record `"callback_sandboxed": false`, and its `session_id` should be `null` or indicate a non‑canonical experiment.  **For production multi‑tenant environments, sandboxing should be mandatory regardless of the flag; the flag exists to allow programs to explicitly request sandboxing where the operator’s default policy may not enforce it.**
+If the flag is not set, the runtime may still sandbox callbacks, but is not required to do so. However, a map produced with **unsandboxed** callbacks shall **not** be considered a canonical truth‑anchor map (§4.6); its `.gunzmeta` must record `"callback_sandboxed": false`, and its `session_id` should be `null` or indicate a non‑canonical experiment. **For production multi‑tenant environments, sandboxing should be mandatory regardless of the flag; the flag exists to allow programs to explicitly request sandboxing where the operator's default policy may not enforce it.**
+
+*Base conformant implementations are not required to support sandboxed callbacks or environment snapshots; those are optional extensions for multi‑tenant production environments. A minimal implementation may reject any program with the sandboxed_callbacks_required flag set and still be conformant.*
 
 During plan construction, `PURE_CALL` references are resolved to direct function pointers.
 
-**Environment Snapshot (normative):**  
-To enable deterministic conditional orchestration using only `PURE_CALL`, the runtime provides an immutable **Environment Snapshot** object that may be bound into the plan at construction time.  A snapshot is a canonical, signed, immutable structure containing any external state the `PURE_CALL` may read (hardware capabilities, prior scan statistics, library metadata).  `PURE_CALL` callbacks may read only the provided snapshot and their explicit `args`.  The snapshot is part of the plan’s canonical identity; plans built with different snapshots are distinct.  If a program requires environment data not present in the snapshot, plan construction shall fail with `GUNZ_INVALID_LIBRARY`.  The snapshot format and signing rules are defined in §4.7.
+**Environment Snapshot (normative, optional):**  
+To enable deterministic conditional orchestration using only `PURE_CALL`, the runtime provides an immutable **Environment Snapshot** object that may be bound into the plan at construction time. A snapshot is a canonical, signed, immutable structure containing any external state the `PURE_CALL` may read (hardware capabilities, prior scan statistics, library metadata). `PURE_CALL` callbacks may read only the provided snapshot and their explicit `args`. The snapshot is part of the plan's canonical identity; plans built with different snapshots are distinct. If a program requires environment data not present in the snapshot, plan construction shall fail with `GUNZ_INVALID_LIBRARY`. The snapshot format and signing rules are defined in §4.7. *Support for environment snapshots is optional for base conformance.*
 
 **Error handling:** If a `PURE_CALL` returns `GUNZ_CALLBACK_FAILED`, the entire `ExecutionPlan_Run` shall abort immediately and return `GUNZ_CALLBACK_FAILED` to the caller. No further zones are evaluated, and any partial map output is discarded.
 
@@ -371,7 +379,7 @@ After any error, the runtime must return to a valid baseline: all pending scans 
 The runtime maintains a private object table that maps 32‑bit `object_id` values to internal resources (arena buffers, file handles, network streams, etc.).
 
 - **Maximum entries:** Implementation‑defined; must be at least 256.
-- **Lifetime:** Objects persist until explicitly released. A runtime object is considered **referenced** if any executing plan, pending callback, or ongoing asynchronous operation holds its `object_id`. Once all references have been dropped, the object may be released and its ID reused. The mechanism for tracking references is implementation‑defined (e.g., reference counting, garbage collection).  *A recommended technique to avoid use‑after‑free is to embed a generation counter in the high bits of each `object_id`; the runtime increments the counter on each allocation and rejects requests that reference an old generation.*
+- **Lifetime:** Objects persist until explicitly released. A runtime object is considered **referenced** if any executing plan, pending callback, or ongoing asynchronous operation holds its `object_id`. Once all references have been dropped, the object may be released and its ID reused. The mechanism for tracking references is implementation‑defined (e.g., reference counting, garbage collection). *A recommended technique to avoid use‑after‑free is to embed a generation counter in the high bits of each `object_id`; the runtime increments the counter on each allocation and rejects requests that reference an old generation.*
 - **Invalid IDs:** Using an ID that has not been allocated or has been released shall cause the operation to return `GUNZ_INVALID_OBJECT`. The runtime must not perform any action when this error is raised.
 - **Duplicate IDs:** The runtime must not allocate the same ID to two different resources simultaneously.
 - **Null object:** ID 0 is reserved and never valid.
@@ -385,14 +393,15 @@ The runtime maintains an immutable mapping from `library_id` (u16) to `LibraryPr
 - If `quantum == 0`, use the library quantum.
 - If `mult_num == 0` **or** `mult_den == 0`, the multiplier (both numerator and denominator) is taken entirely from the library profile.
 - `round_mode` is used as given (0 is a valid value).
+- If the library profile does not specify `jitter_weight`, the default value **4** is used.
 - Other header fields have no library‑supplied defaults.
 
 **Library profile validation:**  
-A library profile must itself satisfy `quantum ≥ 1`, `mult_num ≠ 0`, and `mult_den ≠ 0`.  If a library profile violates any of these invariants, plan construction shall fail with `GUNZ_INVALID_LIBRARY`.  
+A library profile must itself satisfy `quantum ≥ 1`, `mult_num ≠ 0`, and `mult_den ≠ 0`. If a library profile violates any of these invariants, plan construction shall fail with `GUNZ_INVALID_LIBRARY`.  
 
-After merging, `quantum` must be ≥ 1 and both `mult_num` and `mult_den` must be non‑zero.  If any of these conditions fails (e.g., because the bytecode and the library both specified zero), plan construction fails with `GUNZ_INVALID_LIBRARY`.
+After merging, `quantum` must be ≥ 1 and both `mult_num` and `mult_den` must be non‑zero. If any of these conditions fails (e.g., because the bytecode and the library both specified zero), plan construction fails with `GUNZ_INVALID_LIBRARY`.
 
-`library_id = 0` is reserved for “no library”; the header must supply all parameters and no substitution occurs. A missing library entry causes plan construction to fail with `GUNZ_INVALID_LIBRARY`.
+`library_id = 0` is reserved for "no library"; the header must supply all parameters and no substitution occurs. A missing library entry causes plan construction to fail with `GUNZ_INVALID_LIBRARY`.
 
 ### 3.11 Resonance Evaluator (Core Scanning Algorithm)
 
@@ -400,11 +409,13 @@ The resonance evaluator computes the metrics (`block_time_delta`, `jitter`, `mot
 
 **Inputs:**
 - A zone `[fps_low, fps_high]` in 0.00001 FPS units, along with the system parameters: `quantum`, `target_ticks`, `mult_num`/`mult_den`, `round_mode`, `hold_frames`, `sep_frames`.
-- `reference_block_time` – the ideal total block time the system is intended to achieve, expressed in the same base time unit as the header.  This value **must be supplied at plan‑construction time** by the user or AI agent.  If no explicit value is provided, plan construction shall fail with `GUNZ_INVALID_LIBRARY`.  The value actually used is recorded in the map header (§4.2.1) and the `.gunzmeta` file (§4.6).
+- `reference_block_time` – the ideal total block time the system is intended to achieve, expressed in the same base time unit as the header. This value **must be supplied at plan‑construction time** by the user or AI agent. If no explicit value is provided, plan construction shall fail with `GUNZ_INVALID_LIBRARY`. The value actually used is recorded in the map header (§4.2.1) and the `.gunzmeta` file (§4.6).
 - `step_fps` – the dense‑scan step size in 0.00001 FPS units.
-- `map_type` – from the map header: `0` = standard, `1` = detrimental. The map header also provides a `detrimental_threshold` value.
-- An optional **explicit delta pair** `(d_lo_ov, d_hi_ov)` with a boolean flag indicating whether the override is active.  If the flag is true, the evaluator uses the override values for the block‑time sum only; it does **not** alter the computation of `N` or `N_hi`.
-- If `long_term_scan` is active, a **measurement window duration** `window_duration` (a `u64` in the **same base time unit as the header**) is supplied at plan construction and embedded in the evaluator block. The normative maximum `window_duration` is **2³² base‑time units**; any request exceeding this value shall cause plan construction to fail with `GUNZ_INVALID_LIBRARY`.  The effective real‑time ceiling varies with `time_unit`: from ~4.3 milliseconds (`time_unit=12`) to ~136 years (`time_unit=0`); users must choose a `time_unit` that matches their measurement domain.
+- `map_type` – from the map header: `0` = standard, `1` = detrimental. The map header also provides separate detrimental thresholds for jitter and motion jitter.
+- An optional **explicit delta pair** `(d_lo_ov, d_hi_ov)` with a boolean flag indicating whether the override is active. If the flag is true, the evaluator uses the override values for the block‑time sum only; it does **not** alter the computation of `N` or `N_hi`.
+- If `long_term_scan` is active, a **measurement window duration** `window_duration` (a `u64` in the **same base time unit as the header**) is supplied at plan construction and embedded in the evaluator block. The normative maximum `window_duration` is **2³² base‑time units**; any request exceeding this value shall cause plan construction to fail with `GUNZ_INVALID_LIBRARY`. The effective real‑time ceiling varies with `time_unit`: from ~4.3 milliseconds (`time_unit=12`) to ~136 years (`time_unit=0`); users must choose a `time_unit` that matches their measurement domain.
+- `jitter_weight` – the merged effective weight from the library profile (default **4**, range 1–255).
+- `jitter_window_radius` – the radius, in 0.00001 FPS units, for the jitter‑point window. This is derived from the map header's `jitter_window_radius` field: if the stored value is 0, the default radius **10000** (21 points, ±0.1 FPS) is used; otherwise the actual radius = stored_value × 1000. The stored value must be ≥ 1 and ≤ 255, and the resulting radius is guaranteed to be a multiple of 1000.
 
 **Algorithm:**
 
@@ -413,50 +424,44 @@ The evaluator proceeds in two phases:
 **Phase 1 — Dense scan.** The zone is sampled at `fps_raw = fps_low, fps_low + step_fps, …` up to and including `fps_high`. For each `fps_raw`:
 
 1. **Compute frame time.**  
-   `T = 10^(time_unit + 5) / fps_raw` (64‑bit unsigned integer division; for `time_unit ≤ 12` this is guaranteed not to overflow 64‑bit).  For `time_unit ≥ 10` the numerator `10^(time_unit+5)` must be computed in 128‑bit before division.  
+   `T = 10^(time_unit + 5) / fps_raw` (64‑bit unsigned integer division; for `time_unit ≤ 12` the numerator fits safely in 64 bits). For `time_unit ≥ 10`, implementations are encouraged to compute the numerator in 128‑bit before division to maintain future‑compatibility with extended ranges.  
    Compute the **continuous deltas** that define the temporal pattern of `d_hi` frames:  
    `d_lo_cont = T / quantum` (floor), `d_hi_cont = d_lo_cont + 1`.
 
 2. **Jitter window evaluation.**  
-   21 jitter points at `fps_raw + Δ`, `Δ = -10000, -9000, …, +10000` (Δ is in the same 0.00001 FPS units).  If `fps_raw + Δ ≤ 0` for any Δ, that jitter point is skipped and does not contribute to the sample count.  
+   Let `R = jitter_window_radius`. The jitter offsets Δ are generated as:  
+   `Δ = -R, -R+1000, -R+2000, …, +R`.  
+   If `fps_raw + Δ ≤ 0` for any Δ, that jitter point is skipped and does not contribute to the sample count.  
    For each valid jitter point, compute `T_jitter` and total block time via step 3. The population standard deviation of the block times → `jitter` (base time unit).  
-   Motion jitter is computed from the counts `N_lo` and `N_hi` using a closed‑form multiset variance. Each advance value (in ticks) is scaled by 100, yielding two values `a = 100 × adv_lo` and `b = 100 × adv_hi`. The motion jitter for this jitter point is the population standard deviation of the multiset consisting of `N_lo` copies of `a` and `N_hi` copies of `b`, computed via the integer standard deviation algorithm of §4.5.3.  
+   Motion jitter is computed from the counts `N_lo` (where `N_lo = N − N_hi`) and `N_hi` using a closed‑form multiset variance. Each advance value (in ticks) is scaled by 100, yielding two values `a = 100 × adv_lo` and `b = 100 × adv_hi`. The motion jitter for this jitter point is the population standard deviation of the multiset consisting of `N_lo` copies of `a` and `N_hi` copies of `b`, computed via the integer standard deviation algorithm of §4.5.3.  
 
-   **Saturation of motion jitter:** Each individual jitter point’s motion jitter value is saturated to 65535 before averaging.  The average of these 21 saturated values (rounded to nearest integer, half‑to‑even) is then itself saturated to 65535 and stored as `motion_jitter`.  The maximum of the 21 saturated values → `peak_motion_jitter` (same scale and saturation).  **Saturation occurs before the conversion to base time units.**  
-   *Note on double saturation:* The per‑point saturation and the final saturation on the average keep the stored values within the 16‑bit range.  Raw, unsaturation full‑precision statistics are preserved in the optional `.gunzstats` file.
-
-   **The 21‑sample jitter window is the core deterministic simulation, not a noise perturbation.** All points are evaluated exactly; there is no randomness involved. The window size of 21 points, spaced uniformly at ±0.1 FPS, is normative and must not be altered by implementations. Future revisions may parameterise the window via a reserved header field; at present it is fixed.
+   **Saturation of motion jitter:** Each individual jitter point's motion jitter value is saturated to 65535 before averaging. The average of these saturated values (rounded to nearest integer, half‑to‑even) is then itself saturated to 65535 and stored as `motion_jitter`. The maximum of the saturated values → `peak_motion_jitter` (same scale and saturation). **Saturation occurs before the conversion to base time units.**  
+   *Note on double saturation:* The per‑point saturation and the final saturation on the average keep the stored values within the 16‑bit range. Raw, unsaturation full‑precision statistics are preserved in the optional `.gunzstats` file.
 
 3. **Discrete simulation of a single block.**  
    Given the **continuous deltas** `d_lo_cont`, `d_hi_cont`:
-   - Compute the **continuous advances**: `adv_lo_cont = (d_lo_cont * mult_num) / mult_den` (floor), `adv_hi_cont` similarly.  Use 128‑bit intermediates.
+   - Compute the **continuous advances**: `adv_lo_cont = (d_lo_cont * mult_num) / mult_den` (floor), `adv_hi_cont` similarly. Use 128‑bit intermediates.
    - If `max(adv_lo_cont, adv_hi_cont) == 0`, set saturation sentinels and skip.
-   - **Computing `N`:** The smallest integer `N` such that total tick advance ≥ `target_ticks` is obtained by directly solving the inequality.  Because the total tick advance for a given `N` and `N_hi` is a deterministic function of `T` and the continuous deltas, `N` can be found by a direct calculation rather than a general‑purpose search.  A conformant implementation may use a closed‑form solution (e.g., `N = ceil(target_ticks / max(adv_lo_cont, adv_hi_cont, 1))` with a small neighbourhood check to account for rounding effects) or a bounded binary search over `[1, N_max]`.  Whichever method is used must produce the exact smallest integer satisfying the advance constraint.  The computed `N` must not exceed the normative maximum `MAX_N = 2³¹ − 1`; if it would, the candidate is treated as saturated.
+   - **Computing `N`:** The smallest integer `N` such that total tick advance ≥ `target_ticks`. A conformant implementation may use a closed‑form estimate `N₀ = ceil(target_ticks / max(adv_lo_cont, adv_hi_cont, 1))` followed by a small neighbourhood search, or a bounded binary search over `[1, N_max]`. The computed `N` must be validated by computing the actual total advance using the derived `N_hi`, and must not exceed `MAX_N = 2³¹ − 1` (else saturated).
    - `R = round(N * T / quantum) * quantum` (128‑bit for `N*T`). The rounding function uses the current `round_mode`.
    - `Q = R / quantum`; compute `N_hi = Q − N*d_lo_cont`.  
-     - If `N_hi` is within `[0, N]`, use the computed value.  
-     - If `N_hi < 0` or `N_hi > N`, the candidate is invalid (arithmetic inconsistency); set saturated sentinels and `FLAG_AVOID`, and skip the remaining steps for this candidate.  
+     If `N_hi` is within `[0, N]`, let `N_lo = N − N_hi` and check that `N_lo * adv_lo_cont + N_hi * adv_hi_cont ≥ target_ticks`. If the advance is insufficient, or if `N_hi` is outside `[0, N]`, the candidate is invalid: set saturated sentinels and `FLAG_AVOID`, and skip the remaining steps for this candidate.
    - **Block time computation:**  
-     If an explicit delta override is **not** active: `block_time = R` (the value `R` already incorporates the continuous deltas correctly).  
-     If an explicit delta override **is** active: the override values `d_lo_ov`, `d_hi_ov` are used only for the per‑frame advance magnitudes in the block‑time sum:  
-     `block_time = ((N − N_hi) * d_lo_ov + N_hi * d_hi_ov) * quantum`.  
-   - The total time including hold and separation frames is `total_time = block_time + (hold_frames + sep_frames) * T`.
-   - In long‑term mode, repeat simulation for consecutive blocks until the cumulative block time (excluding hold/sep frames) reaches or exceeds `window_duration`. The last block is included even if the cumulative time exceeds the window. The map entry then stores the **average** block time over all evaluated blocks, and the aggregate jitter/motion‑jitter over those blocks.  **Long‑term aggregation:** `jitter` is the population standard deviation of the block times across all evaluated blocks; `motion_jitter` is the average motion jitter over the window.  For score computation in long‑term mode, `total_time` is defined as `average_block_time + (hold_frames + sep_frames) * T`, where `T` is the frame time of the FPS candidate.
-   - The total number of blocks evaluated per candidate (in long‑term mode) must not exceed the plan’s `max_eval_iterations`. If this limit is reached, the candidate is marked with saturated sentinels and `FLAG_AVOID`.  *Note:* The `max_eval_iterations` limit is an upper bound; the evaluator stops as soon as the cumulative time satisfies `window_duration`.
-   - **Memory efficiency:** All per‑candidate temporary data must be stored in the `ScratchArena` and reused across blocks; implementations shall not allocate separate per‑block buffers.
+     If an explicit delta override is **not** active: `block_time = R`.  
+     If an override **is** active: `block_time = ((N − N_hi) * d_lo_ov + N_hi * d_hi_ov) * quantum`.  
+   - `total_time = block_time + (hold_frames + sep_frames) * T`.
+   - In **long‑term mode**, repeat simulation until cumulative block time (excluding hold/sep) ≥ `window_duration`. The entry stores the **average** block time and aggregate jitter/motion‑jitter. `total_time` for scoring is `average_block_time + (hold_frames + sep_frames) * T`. The evaluator stops as soon as `window_duration` is satisfied; the `max_eval_iterations` limit is an upper bound only.
+   - **Memory efficiency (normative):** All per‑candidate temporary data (block time accumulators, jitter accumulators, variance intermediates) **must** be stored in the `ScratchArena` and reused across blocks. Implementations shall **not** allocate separate per‑block buffers.
 
 4. **Score computation.**  
-   `score = |total_time - reference_block_time| + 4 * jitter + motion_btu`, where `motion_btu = ((uint128_t)motion_jitter * mult_den * quantum) / (mult_num * 100)`, rounded half‑to‑even.  All three terms are in the base time unit.  
-   **Important:** The division by 100 in the `motion_btu` formula must strictly follow the half‑to‑even rounding defined in §4.5.1.  Implementations **MUST NOT** substitute the common C idiom `(val + 50) / 100`, as that implements round‑half‑up and will produce non‑conforming results on exact `.50` ties.  
+   `score = |total_time - reference_block_time| + jitter_weight * jitter + motion_btu`, where `motion_btu = ((uint128_t)motion_jitter * mult_den * quantum) / (mult_num * 100)`, rounded half‑to‑even. All three terms are in the base time unit.  
+   **Important:** The division by 100 in the `motion_btu` formula must strictly follow the half‑to‑even rounding defined in §4.5.1. Implementations **MUST NOT** substitute the common C idiom `(val + 50) / 100`, as that implements round‑half‑up and will produce non‑conforming results on exact `.50` ties.  
    The absolute difference `|total_time - reference_block_time|` is saturated to `UINT32_MAX` and stored in `block_time_delta`. Note: the field `block_time_delta` always holds an absolute difference, not the total block time; for the absolute block time, add it to `reference_block_time`.
 
 **Explicit delta override semantics (summary):**  
-When a `DELTA` instruction is active, the override does **not** change the number of frames `N` or the count of `d_hi` frames `N_hi`.  Those are always computed from the continuous deltas `d_lo_cont`, `d_hi_cont`, preserving the temporal pattern dictated by the continuous frame time `T`.  The override values `d_lo_ov`, `d_hi_ov` replace only the per‑frame advance magnitudes in the final block‑time sum, as shown above.
+When a `DELTA` instruction is active, the override does **not** change the number of frames `N` or the count of `d_hi` frames `N_hi`. Those are always computed from the continuous deltas `d_lo_cont`, `d_hi_cont`, preserving the temporal pattern dictated by the continuous frame time `T`. The override values `d_lo_ov`, `d_hi_ov` replace only the per‑frame advance magnitudes in the final block‑time sum, as shown above.
 
 **Map entry consolidation:** After computing all FPS candidates in a zone, consecutive positions with identical `block_time_delta`, `jitter`, `motion_jitter`, `peak_motion_jitter`, and flags are merged into a single entry. Its `run_length` equals the number of merged steps. Only the first entry in the run contributes a `fps_delta_start`; subsequent merged FPS candidates do not. This guarantees deterministic emission regardless of scan resolution.
-
-**Plateau‑jump optimisation (informative):**  
-The score, `N`, and `N_hi` are step functions of `fps_raw` — they change only at predictable boundaries (where `d_lo_cont` or `N_max` changes). A conformant implementation may compute these boundaries directly and evaluate only one interior candidate per constant‑score interval, jumping directly to the next boundary instead of stepping through every `fps_raw` unit. This optimisation does not alter the resulting consolidated map in any way; it merely reduces the number of evaluator invocations. The specification imposes no requirement on *how* the evaluator determines the interval boundaries, only that the final emitted map is bit‑identical to what a full dense scan would produce.
 
 **Phase 2 — Stability width.**  
 For each FPS candidate \(c\) with score \(S_c\), let \(T\) be the stability tolerance defined below. The stability interval for \(c\) is the largest contiguous set of candidates \([L, R]\) such that \(L \le c \le R\) and for every candidate \(i\) in that interval, \(|S_i - S_c| \le T\). The stability width is derived from the FPS range of that interval.
@@ -464,20 +469,27 @@ For each FPS candidate \(c\) with score \(S_c\), let \(T\) be the stability tole
 - For `time_unit ≥ 9` (base unit nanoseconds or finer), the tolerance is \(T = 10^{time\_unit - 9}\) base‑time‑units (e.g., 1 ns at `time_unit = 9`, 1000 ps at `time_unit = 12`).
 - For `time_unit < 9` (coarser than nanoseconds), the tolerance would be fractional, so stability width is set to **zero** for all entries in these coarser scans.
 
-Because the maximum representable stability width is 6.5535 FPS (stored as `u16` in 0.0001 FPS units), implementations may use a bounded sliding‑window algorithm (e.g., a circular buffer of at most `ceil(6.5535 / (step_fps * 1e-5))` entries) instead of storing the entire zone’s scores. Any algorithm that produces the same maximal intervals is conformant.
+Because the maximum representable stability width is 6.5535 FPS (stored as `u16` in 0.0001 FPS units), implementations may use a bounded sliding‑window algorithm (e.g., a circular buffer of at most `ceil(6.5535 / (step_fps * 1e-5))` entries) instead of storing the entire zone's scores. Any algorithm that produces the same maximal intervals is conformant.
 
 - The stability width is `(fps_raw[right] − fps_raw[left]) / 10` (integer division, truncating toward zero), stored in 0.0001 FPS units, saturated to 65535. If `right == left`, the width is 0.
-- **Saturation flag:** If the computed width exceeds 65535 before saturation, bit 0 of the `flags` field (`STAB_SATURATED`) shall be set to 1.  This indicates that the true stability width is **at least** 6.5535 FPS (the maximum representable value).  The exact width can be recovered from the raw statistics file (`.gunzstats`).
+- **Saturation flag:** If the computed width exceeds 65535 before saturation, bit 0 of the `flags` field (`STAB_SATURATED`) shall be set to 1. This indicates that the true stability width is **at least** 6.5535 FPS (the maximum representable value). The exact width can be recovered from the raw statistics file (`.gunzstats`).
 - When multiple FPS candidates are merged into a single entry during consolidation, the stored `stability_width` is the **maximum** width among all FPS candidates in that interval.
 
 **Detrimental mode marking:**  
-When `map_type = 1`, an interval is marked `FLAG_AVOID` if its `jitter` ≥ `detrimental_threshold` **or** its `motion_btu` (converted) ≥ `detrimental_threshold`. If `detrimental_threshold` is zero, the default is the saturation limit of the respective field (255 for `jitter`, 65535 for the converted motion‑btu). A `detrimental_threshold` of zero therefore effectively disables detrimental marking for that field. Note: the `detrimental_threshold` is a single `u8` value shared by both metrics; systems with larger motion‑jitter values should use `detrimental_threshold = 0` and rely on an external post‑scan filter.
+When `map_type = 1`, an interval is marked `FLAG_AVOID` if:
+- Its `jitter` ≥ `detrimental_jitter_threshold`, **or**
+- Its `motion_btu` (converted to base time units) ≥ `detrimental_motion_threshold`.
+
+If `detrimental_jitter_threshold` is zero, the default is the saturation limit of the `jitter` field (255). If `detrimental_motion_threshold` is zero, the default is the saturation limit of the converted motion value (65535). A threshold of zero therefore effectively disables detrimental marking for that metric. The two thresholds are independent; a zone may be flagged for excessive jitter but acceptable motion, or vice versa.
 
 **Skipped zones:**  
-A `SKIP_ZONE` emits a single placeholder entry covering the full skipped interval.  The entry has `FLAG_SKIPPED` set, `run_length` equal to the number of steps in the interval, and all metrics zero.  Sparse merging rules apply normally.
+A `SKIP_ZONE` emits entries covering the full skipped interval.  
+- If the number of steps in the interval fits in a `u16` (≤ 65535), a single placeholder entry is emitted with `FLAG_SKIPPED` set, `run_length` equal to the step count, and all quantitative metrics zero.  
+- If the interval is wider than 65535 steps, the scanner shall emit a **long‑jump entry** (see §4.2) with `FLAG_SKIPPED` set in the flags byte, and the gap field giving the total step count.  
+Sparse merging rules apply normally to the emitted entries.
 
 **Large zone clamping:**  
-When the iteration count for a zone would exceed the plan’s `max_scan_iterations`, the evaluator truncates the zone, emits entries for the evaluated portion, and emits a long‑jump entry for the skipped remainder.
+When the iteration count for a zone would exceed the plan's `max_scan_iterations`, the evaluator truncates the zone, emits entries for the evaluated portion, and emits a long‑jump entry for the skipped remainder.
 
 ---
 
@@ -491,8 +503,9 @@ When the iteration count for a zone would exceed the plan’s `max_scan_iteratio
 - `callback_abi_version` (32‑bit) – a single global version for all callbacks in this library; the fingerprint hashes this value once.
 - **`callback_id` uniqueness:** All `callback_id` values within a library profile must be unique.
 - Clock quantum, multiplier, rounding, boundary index, coarse LUT.
+- **`jitter_weight`** (u8, default 4, range 1–255). If absent, the default 4 is used.
 
-A library profile is valid only if `quantum ≥ 1`, `mult_num ≠ 0`, and `mult_den ≠ 0`.  Profiles that violate these invariants shall be rejected during plan construction with `GUNZ_INVALID_LIBRARY`.
+A library profile is valid only if `quantum ≥ 1`, `mult_num ≠ 0`, and `mult_den ≠ 0`. Profiles that violate these invariants shall be rejected during plan construction with `GUNZ_INVALID_LIBRARY`.
 
 **Compiler determinism:** The reference offline library compiler must produce byte‑identical libraries from identical source inputs. Other compilers may be used provided they reproduce the reference output.
 
@@ -500,13 +513,13 @@ A library profile is valid only if `quantum ≥ 1`, `mult_num ≠ 0`, and `mult_
 
 - All integers are little‑endian.
 - Sparse intervals are tightly packed; no padding.
-- Every map entry is exactly **16 bytes**.  The fields are ordered to place all multi‑byte integers on their natural alignments:
+- Every map entry is exactly **16 bytes**. The fields are ordered to place all multi‑byte integers on their natural alignments:
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0  | s16  | `fps_delta_start`       | FPS offset (0.00001 FPS units). |
 | 2  | u16  | `run_length`            | Consecutive steps covered (0.00001 FPS units). |
-| 4  | u32  | `block_time_delta`      | Absolute difference between total block time and `reference_block_time`, saturated to `UINT32_MAX`.  Unit: base time unit. |
+| 4  | u32  | `block_time_delta`      | Absolute difference between total block time and `reference_block_time`, saturated to `UINT32_MAX`. Unit: base time unit. |
 | 8  | u8   | `jitter`                | Block‑time jitter (base time unit). |
 | 9  | u8   | `flags`                 | Interval flags (see below). |
 | 10 | u16  | `motion_jitter`         | Average motion jitter (ticks × 100). |
@@ -524,7 +537,7 @@ A library profile is valid only if `quantum ≥ 1`, `mult_num ≠ 0`, and `mult_
 | 4‑7 | (reserved)       | Must be 0. |
 
 **Long jump entry:**  
-A long‑jump entry is identified by the sentinel combination `run_length == 0` **and** `block_time_delta == 0`. The `fps_delta_start` field is set to zero and ignored. Bytes at offsets 8–15 are reinterpreted as a little‑endian `s64` giving the total FPS gap in 0.00001 FPS units. The `flags` byte is preserved and may carry `FLAG_AVOID`.
+A long‑jump entry is identified by the sentinel combination `run_length == 0` **and** `block_time_delta == 0`. The `fps_delta_start` field is set to zero and ignored. Bytes at offsets 8–15 are reinterpreted as a little‑endian `s64` giving the total FPS gap in 0.00001 FPS units. The `flags` byte is preserved and may carry `FLAG_AVOID` or `FLAG_SKIPPED`.
 
 **Sparse map emission:**  
 When `sparse_map` is set, intervals omitted because all quantitative metrics are zero (and the entry is not a long‑jump or skipped zone) have their `run_length` merged into the next entry's `fps_delta_start`, preserving spatial continuity. This is a storage optimisation; decoders must process entries sequentially to reconstruct absolute FPS positions. Decoders that require random access may first build an index by scanning all entries; that index can be cached separately.
@@ -535,26 +548,25 @@ When `sparse_map` is set, intervals omitted because all quantitative metrics are
 
 | Field | Size | Description |
 |-------|------|-------------|
-| `base_fps`           | u32 | Base FPS (0.00001 FPS units).  **Normative:** This value shall be the minimum `fps_low` of all evaluated zones, or 0 if no zones were scanned. |
-| `reference_block_time` | u32 | Theoretical ideal block time (base time unit).  The value stored is the one supplied at plan‑construction time (§3.11). |
-| `ppm_drift_scalar`   | u32 | **Reserved (must be zero).**  Formerly drift compensation; reserved for future use. |
+| `base_fps`           | u32 | Base FPS (0.00001 FPS units). **Normative:** This value shall be the minimum `fps_low` of all evaluated zones, or 0 if no zones were scanned. |
+| `reference_block_time` | u32 | Theoretical ideal block time (base time unit). The value stored is the one supplied at plan‑construction time (§3.11). |
+| `ppm_drift_scalar`   | u32 | **Reserved (must be zero).** Formerly drift compensation; reserved for future use. |
 | `map_type`           | u8  | 0 = standard, 1 = detrimental. |
-| `detrimental_threshold` | u8 | Threshold in base time unit; 0 defaults to the saturation limit (effectively disabling the check). Shared by both `jitter` and `motion_btu` comparisons. |
+| `detrimental_jitter_threshold` | u8 | Threshold for jitter in detrimental mode; 0 defaults to 255 (saturation limit). |
 | `time_unit`          | u8  | Decimal exponent such that one base time unit = 10⁻ᵗⁱᵐᵉ_ᵁⁿⁱᵗ seconds. Must match the bytecode header. |
 | `stability_mapping_flag` | u8 | Always 1 in v3.x. |
-| `map_version`        | u16 | `0x0008` for v3.10.0 maps.  Decoders shall reject maps with an unknown `map_version`. |
-| `jitter_window_radius` | u8 | Reserved for future use; must be 0 in v3.x. |
-| `xxh3_64`            | u64 | XXH3‑64 checksum (seed=0) of all entries, little‑endian.  This checksum provides per‑file integrity against accidental corruption; for global deduplication and map identity the XXH3‑128 fingerprint (§4.3) must be used. |
-| `reserved`           | u8[5] | Must be zero. |
+| `map_version`        | u16 | `0x000D` for v3.15.x maps. Decoders shall reject maps with an unknown `map_version`. |
+| `jitter_window_radius` | u8 | Jitter window radius scale factor. If 0, the default radius 10000 (21 points, ±0.1 FPS) is used. If non‑zero, the actual radius = `jitter_window_radius` × 1000 (0.00001 FPS units); the value must be between 1 and 255 inclusive, and the resulting radius is a multiple of 1000. |
+| `detrimental_motion_threshold` | u16 | Threshold for motion jitter (converted to base time units) in detrimental mode; 0 defaults to 65535 (saturation limit). |
+| `xxh3_64`            | u64 | XXH3‑64 checksum (seed=0) of all entries, little‑endian. This provides per‑file integrity; the XXH3‑128 fingerprint (§4.3) is used for global deduplication and map identity. |
+| `reserved`           | u8[3] | Must be zero. |
 
-The header is exactly 32 bytes (4+4+4+1+1+1+1+2+1+8+5 = 32).
+The header is exactly 32 bytes (4+4+4+1+1+1+1+2+1+2+8+3 = 32).
 
 ### 4.3 Integrity & Fingerprint
 
-- **Per‑map integrity:** Mandatory XXH3‑64 over concatenated 16‑byte entry chunks.  This provides a per‑file integrity check against accidental corruption.
-- **Fingerprint (global identity):** `XXH3‑128(seed=0)` over the canonical little‑endian serialization (without padding) of: `magic`, `version`, `library_id`, `generation`, `solver_version`, `callback_abi_version`, `target_ticks`, `hold_frames`, `sep_frames`, `round_mode`, `scan_resolution` (default 1), `map_type`, `detrimental_threshold`, `time_unit`, `map_version`, **`quantum` (the effective post‑merge value), `mult_num`, `mult_den`, `reference_block_time`**.  This 128‑bit fingerprint is used for global deduplication and map identity; it is recorded in the `.gunzmeta` file.
-- *After any mutation (e.g., a `JOIN`), both the per‑map XXH3‑64 and the XXH3‑128 fingerprint must be recomputed for the resulting map.*
-
+- **Per‑map integrity:** Mandatory XXH3‑64 over concatenated 16‑byte entry chunks.
+- **Fingerprint (global identity):** `XXH3‑128(seed=0)` over the canonical little‑endian serialization (without padding) of: `magic`, `version`, `library_id`, `generation`, `solver_version`, `callback_abi_version`, `target_ticks`, `hold_frames`, `sep_frames`, `round_mode`, `scan_resolution` (default 1), `map_type`, `detrimental_jitter_threshold`, `detrimental_motion_threshold`, `time_unit`, `map_version`, **`quantum` (the effective post‑merge value), `mult_num`, `mult_den`, `reference_block_time`, `jitter_window_radius` (the u8 as stored), `jitter_weight` (effective u8).** This 128‑bit fingerprint is used for global deduplication and map identity; it is recorded in the `.gunzmeta` file. *After any mutation (e.g., a `JOIN`), both checksums must be recomputed.*
 - On cache hit, the runtime shall compare the canonical bytecode; on mismatch, invalidate.
 - For impure/dynamic programs, a random salt is included and deduplication is disabled.
 
@@ -578,10 +590,10 @@ else if 2*r > b:      // closer to q+1
     q = q + 1
 ```
 
-All standard deviation and scoring calculations that use this division operate exclusively on non‑negative quantities. This rounding rule applies to every division in normative pathways unless otherwise stated.
+All standard deviation and scoring calculations that use this division operate exclusively on non‑negative quantities. This rounding rule applies to every division in normative pathways unless otherwise stated. The rounding modes `ceil` and `truncate` provided in the header are defined by standard integer arithmetic (`ceil` rounds toward positive infinity, `truncate` rounds toward zero) and are not subject to the tie‑breaking rule above.
 
 **Implementation warning – anti‑pattern:**  
-Implementations **MUST NOT** substitute the common C idiom `(val + 50) / 100` for rounding division by 100, as that implements round‑half‑up and will produce non‑conforming results on exact `.50` ties.  The division must strictly follow the half‑to‑even algorithm above.  The following C snippet shows a correct implementation:
+Implementations **MUST NOT** substitute the common C idiom `(val + 50) / 100` for rounding division by 100, as that implements round‑half‑up and will produce non‑conforming results on exact `.50` ties. The division must strictly follow the half‑to‑even algorithm above. The following C snippet shows a correct implementation:
 
 ```c
 // Correct half‑to‑even division by 100
@@ -595,11 +607,11 @@ if (r > 50 || (r == 50 && (q & 1) != 0)) {
 
 #### 4.5.2 Integer Square Root with Rounding
 
-**`isqrt_rounded(x)` returns the integer `r` that minimises the distance `|r² − x|`; in case of exact tie (two values equally close), it returns the even one.** The tie‑break rule is mathematically unreachable for integer inputs but is retained. Implementations must meet this mathematical definition.  This function is the canonical integer square root used in all normative computations.
+**`isqrt_rounded(x)` returns the integer `r` that minimises the distance `|r² − x|`; in case of exact tie (two values equally close), it returns the even one.** The tie‑break rule is mathematically unreachable for integer inputs but is retained. Implementations must meet this mathematical definition. This function is the canonical integer square root used in all normative computations.
 
 #### 4.5.3 Integer Standard Deviation (Normative Algorithm)
 
-All standard deviation values in the map are computed using the following deterministic integer algorithm.  The algorithm is exact when using the mandated accumulator widths; no alternative formula is permitted except the algebraically identical two‑value closed‑form for motion jitter.  The use of 128‑bit and 256‑bit intermediates is required to guarantee exactness for all normative parameter ranges; implementations should be aware that 256‑bit operations are not natively supported on most hardware and will require software multi‑precision or compiler‑provided extensions.
+All standard deviation values in the map are computed using the following deterministic integer algorithm. The algorithm is exact when using the mandated accumulator widths; no alternative formula is permitted except the algebraically identical two‑value closed‑form for motion jitter. The use of 128‑bit and 256‑bit intermediates is required to guarantee exactness for all normative parameter ranges; implementations should be aware that 256‑bit operations are not natively supported on most hardware and will require software multi‑precision or compiler‑provided extensions.
 
 Let the data values be `x₀, …, xₙ₋₁` (all non‑negative 64‑bit integers).
 
@@ -629,7 +641,7 @@ Let the data values be `x₀, …, xₙ₋₁` (all non‑negative 64‑bit inte
 The result `σ` is the standard deviation in the same unit as the input values.
 
 **Fixed‑point scaling for motion jitter:**  
-Motion jitter samples are provided in ticks × 100 (i.e., the actual tick values multiplied by 100).  The standard deviation output is therefore also in ticks × 100.  The conversion to base time units in the score computation (§3.11 step 4) divides by 100 to restore the tick unit.
+Motion jitter samples are provided in ticks × 100 (i.e., the actual tick values multiplied by 100). The standard deviation output is therefore also in ticks × 100. The conversion to base time units in the score computation (§3.11 step 4) divides by 100 to restore the tick unit.
 
 **Permitted optimisation for two‑valued multisets (motion jitter):**  
 For the special case where the multiset contains only two distinct values `a` and `b`, with multiplicities `n_a` and `n_b` (and `n = n_a + n_b`), implementations may compute the variance directly as `var = n_a·n_b·(a − b)² / n²` using 128‑bit integer arithmetic, since this formula is algebraically identical to the general sum‑of‑squares method and yields the same rounded result. No other alternative variance algorithm is permitted.
@@ -646,18 +658,18 @@ Every time a resonance map is successfully produced, the runtime **shall** also 
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `gunz_version` | string | `"3.10.0"` |
+| `gunz_version` | string | `"3.15.0"` |
 | `map_fingerprint` | string | XXH3‑128 fingerprint (32 hex digits, lowercase) |
 | `creation_timestamp` | string | ISO 8601 UTC with millisecond precision |
 | `session_id` | string or null | A unique identifier for the exploration session. For canonical maps this must be a non‑null string; for non‑canonical (e.g., unsandboxed) maps it should be `null`. |
 | `callback_sandboxed` | boolean | `true` if all `PURE_CALL` callbacks in this scan were executed in a sandboxed environment; `false` otherwise. Canonical maps must have this set to `true`. |
 | `sandbox_type` | string | (Required if `callback_sandboxed` is `true`) The sandboxing mechanism used. |
-| `attestation_signature` | string | (Required if `callback_sandboxed` is `true`) An Ed25519 signature over the canonical JSON of the metadata (excluding this field) produced by the runtime’s attestation key. |
+| `attestation_signature` | string | (Required if `callback_sandboxed` is `true`) An Ed25519 signature over the canonical JSON of the metadata (excluding this field) produced by the runtime's attestation key. *The Ed25519 signing key shall be generated per runtime instance and stored securely; key rotation and revocation are implementation‑defined.* |
 | `runtime_id` | string | (Required if `callback_sandboxed` is `true`) A unique identifier for the runtime instance that performed the scan. |
 | `tool_version` | string | Runtime identification |
-| `plan_parameters` | object | `quantum`, `target_ticks`, `mult_num`, `mult_den`, `round_mode`, `hold_frames`, `sep_frames`, `reference_block_time` (the value supplied at plan‑construction time), `map_type`, `detrimental_threshold`, `sparse_map` (boolean), `scan_resolution_step_fps` |
+| `plan_parameters` | object | `quantum`, `target_ticks`, `mult_num`, `mult_den`, `round_mode`, `hold_frames`, `sep_frames`, `reference_block_time` (the value supplied at plan‑construction time), `map_type`, `detrimental_jitter_threshold`, `detrimental_motion_threshold`, `sparse_map` (boolean), `scan_resolution_step_fps`, `jitter_weight`, `jitter_window_radius` |
 | `scan_zones` | array | Evaluated zones (`fps_low`/`fps_high` pairs) |
-| `micro_lut_used` | boolean | **Deprecated.**  Set to `false`. |
+| `micro_lut_used` | boolean | **Deprecated.** Set to `false`. |
 | `long_term_scan` | boolean | |
 | `time_unit` | integer | Decimal exponent (same as header) |
 | `chain_window_duration` | integer | (Optional) total intended measurement window in base time unit |
@@ -670,20 +682,18 @@ Every time a resonance map is successfully produced, the runtime **shall** also 
 
 The JSON metadata may, at the discretion of the implementation, be appended to the binary `.gunzmap` file as a single JSON blob preceded by the magic marker `0x474D5441` (ASCII `"GMTA"`) and a 32‑bit little‑endian length field, allowing a single self‑containing file. The standalone `.gunzmeta` file remains the normative reference.
 
-**Attestation key management:** The Ed25519 signing key used for attestation signatures shall be generated per runtime instance and stored securely.  The public key should be made available to consumers of canonical maps.  Key rotation and revocation are implementation‑defined.
+### 4.7 Environment Snapshot Format (Normative, Optional)
 
-### 4.7 Environment Snapshot Format (Normative)
-
-An Environment Snapshot is a canonical, signed, immutable structure bound into a plan at construction time to provide external state to `PURE_CALL` callbacks.  A snapshot shall be encoded as a **CBOR** (RFC 8949) map with the following keys, in this order:
+An Environment Snapshot is a canonical, signed, immutable structure bound into a plan at construction time to provide external state to `PURE_CALL` callbacks. A snapshot shall be encoded as a **CBOR** (RFC 8949) map with the following keys, in this order:
 
 - `"snapshot_version"` (u16): always `1` for this version.
 - `"capabilities"` (u64 bitmask): hardware and runtime capability flags.
 - `"stats"` (map of text keys to u64 values): prior scan statistics and library metadata.
 - `"timestamp"` (u64): POSIX UTC timestamp of snapshot creation.
-- `"metadata"` (map of text keys to byte strings): optional extensible data.  *Unknown keys shall be ignored by older runtimes to preserve forward compatibility.*
-- `"signature"` (byte string of 64 bytes): Ed25519 signature over the canonical CBOR serialization of the preceding fields (excluding `"signature"` itself).  The signing key shall be a persistent runtime‑level key.
+- `"metadata"` (map of text keys to byte strings): optional extensible data. *Unknown keys shall be ignored by older runtimes to preserve forward compatibility.*
+- `"signature"` (byte string of 64 bytes): Ed25519 signature over the canonical CBOR serialization of the preceding fields (excluding `"signature"` itself). The signing key shall be a persistent runtime‑level key.
 
-The snapshot’s identity for plan construction is its payload hash (XXH3‑256 of the CBOR bytes excluding `"signature"`).  Two snapshots with different payload hashes are distinct.  The runtime shall validate the signature before binding the snapshot into a plan; an invalid signature shall cause plan construction to fail with `GUNZ_INVALID_LIBRARY`.
+The snapshot's identity for plan construction is its payload hash (XXH3‑256 of the CBOR bytes excluding `"signature"`). Two snapshots with different payload hashes are distinct. The runtime shall validate the signature before binding the snapshot into a plan; an invalid signature shall cause plan construction to fail with `GUNZ_INVALID_LIBRARY`. *Support for environment snapshots is optional for base conformance.*
 
 ### 4.8 Raw Statistics Companion File (`.gunzstats`)
 
@@ -712,21 +722,21 @@ Optional compressed version of `.gunzstats` using delta encoding with run‑leng
 | 0  | u32 | `magic` `0x475A4C00` |
 | 4  | u32 | `candidate_count` |
 | 8  | u32 | `anchor_fps_raw` |
-| 12 | 24 bytes | `anchor_record` (first FPS candidate’s statistics) |
+| 12 | 24 bytes | `anchor_record` (first FPS candidate's statistics) |
 | 36 | … | compressed delta stream |
 
 **Compression algorithm:** For each subsequent FPS candidate, compute signed deltas of the five fields. If all deltas are zero, emit byte `0x00` followed by the run length encoded as **unsigned LEB128**. Otherwise emit a bitmask byte (bits 0‑4 for the five fields in order) and for each set bit, emit the signed delta encoded as **signed LEB128**.
 
 **LEB128 encoding (normative):**
 
-- **Unsigned LEB128:** The value is split into groups of 7 bits (least significant first).  For each group except the last, bit 7 is set to 1; for the last group, bit 7 is 0.  No zero‑extension beyond the minimum necessary bytes.
-- **Signed LEB128:** The integer is treated as a signed two’s‑complement value.  Encoding proceeds identically to unsigned LEB128, except that after the final byte, the most significant bit (bit 6 of that byte) must equal the sign bit of the value, and any higher‑order bits beyond the final byte are sign‑extended during decoding.  This follows the DWARF/WebAssembly convention.
+- **Unsigned LEB128:** The value is split into groups of 7 bits (least significant first). For each group except the last, bit 7 is set to 1; for the last group, bit 7 is 0. No zero‑extension beyond the minimum necessary bytes.
+- **Signed LEB128:** The integer is treated as a signed two's‑complement value. Encoding proceeds identically to unsigned LEB128, except that after the final byte, the most significant bit (bit 6 of that byte) must equal the sign bit of the value, and any higher‑order bits beyond the final byte are sign‑extended during decoding. This follows the DWARF/WebAssembly convention.
 
 ---
 
-## 5. GUNZ‑NET (Under Construction)
+## 5. GUNZ‑NET (Future)
 
-GUNZ‑NET is under construction. It will be designed for automated map exchange, deduplication, and safety. In the meantime, `.gunzmap` and `.gunzperso` files carry their own integrity proofs and can be shared directly.
+GUNZ‑NET is a planned companion specification for automated map exchange, deduplication, and network‑scale coordination. It is not part of the GUNZ 3.15.0 core standard. In the meantime, `.gunzmap` files carry their own integrity proofs and can be shared directly.
 
 ---
 
@@ -735,34 +745,40 @@ GUNZ‑NET is under construction. It will be designed for automated map exchange
 A compliant implementation must:
 
 **Evaluator arithmetic:**
-- Use the corrected `N_hi` formula (`N_hi = Q − N*d_lo_cont` with `Q = R / quantum`), and mark candidates with `FLAG_AVOID` if `N_hi` falls outside `[0, N]`.
-- Compute `N` using a closed‑form solution or bounded binary search that yields the exact smallest integer satisfying the tick‑advance constraint.
+- Use the corrected `N_hi` formula (`N_hi = Q − N*d_lo_cont` with `Q = R / quantum`), and mark candidates with `FLAG_AVOID` if `N_hi` falls outside `[0, N]` or if the actual total tick advance (`N_lo * adv_lo_cont + N_hi * adv_hi_cont`) is less than `target_ticks`.
+- Compute `N` using a closed‑form estimate with neighbourhood verification, or a bounded binary search, and validate the result against the actual total advance.
 - Use the continuous deltas `d_lo_cont`, `d_hi_cont` for determining `N` and `N_hi`; apply explicit delta overrides only to the block‑time sum.
-- Use 64‑bit division for `T`; 128‑bit intermediates where required; 128‑bit numerator for `T` when `time_unit ≥ 10`.
+- Use 64‑bit division for `T`; 128‑bit intermediates where required.
 - Precompute `N_max` only when deltas are invariant.
 - Apply the `time_unit`‑dependent stability‑width tolerance as specified in §3.11 Phase 2.
 - Enforce `time_unit ≤ 12` and `window_duration` bounded to a normative maximum of 2³² base‑time units.
-- Guarantee evaluator loops are bounded by the plan’s `max_scan_iterations` (per zone), `max_eval_iterations` (per candidate, derived dynamically for long‑term scans), and `total_max_scan_iterations` (global, across all zones).
+- Guarantee evaluator loops are bounded by the plan's `max_scan_iterations` (per zone), `max_eval_iterations` (per candidate, derived dynamically for long‑term scans), and `total_max_scan_iterations` (global, across all zones).
 - Compute standard deviations exclusively with the algorithm of §4.5.3 (or the algebraically identical two‑value closed‑form for motion jitter). No other algorithm is permitted.
 - Use `motion_btu` as the unit‑neutral motion term in the score computation.
 - Set bit 0 of the `flags` field when stability width saturates.
 - Reject any plan that does not supply an explicit `reference_block_time` with `GUNZ_INVALID_LIBRARY`.
+- Support all four rounding modes defined for `round_mode` in §2.2, and apply the selected mode consistently in all division steps that depend on it.
+- Store all per‑candidate temporary data in the `ScratchArena` and reuse it across blocks; do **not** allocate separate per‑block buffers (§3.11 step 3).
+- Generate the jitter window from `jitter_window_radius` as specified, including the default behaviour when the stored value is 0.
+- Use `jitter_weight` from the merged library profile (or default 4) in the score formula.
+- Apply detrimental marking separately for jitter and motion jitter using their respective thresholds.
 
 **Map generation:**
-- Emit long‑jump entries for large gaps and clamped scan regions.
+- Emit long‑jump entries for large gaps, clamped scan regions, and wide SKIP_ZONE intervals as specified.
 - Merge sparse intervals by adding their `run_length` to the next entry's `fps_delta_start`.
 - Group consecutive FPS candidates into a single entry only when all metrics and flags are identical.
-- Set `map_version = 0x0008` in the map header.
-- Set `jitter_window_radius = 0` and `ppm_drift_scalar = 0` in the map header.
+- Set `map_version = 0x000D` in the map header.
+- Set `jitter_window_radius` (the u8) appropriately, defaulting to 0 for standard scans.
+- Set `ppm_drift_scalar = 0` in the map header.
 - Use the aligned entry layout (offsets as in §4.2) for all generated maps.
 - Use the normative `JOIN` merge semantics (sweep‑line intersection, maximum of jitter metrics, minimum of stability width) and require identical `base_fps`, `step_fps`, and `reference_block_time` for joined maps; reject any map containing long‑jump entries for use in `JOIN`.
 - Handle run‑length overflow by splitting entries when `run_length` reaches 65535.
-- Include `reference_block_time` in the XXH3‑128 fingerprint as specified in §4.3.
+- Include `reference_block_time`, `jitter_window_radius` (u8), `jitter_weight`, `detrimental_jitter_threshold`, and `detrimental_motion_threshold` in the XXH3‑128 fingerprint as specified in §4.3.
 - Set bit 0 of `flags` when stability width would exceed 65535 before saturation.
 
 **Detrimental mode:**
-- Convert motion jitter to the base time unit before comparing to `detrimental_threshold`.
-- Treat a zero `detrimental_threshold` as disabling the check.
+- Apply separate thresholds for jitter (`detrimental_jitter_threshold`) and motion jitter (`detrimental_motion_threshold`, in base time units after conversion).
+- Treat a zero threshold as defaulting to the saturation limit of the respective field.
 
 **Import/export:**
 - Reject maps with mismatched `time_unit` or `map_version` on import or join.
@@ -785,7 +801,7 @@ A compliant implementation must:
 - Enforce `total_max_scan_iterations` at plan construction; reject any plan whose total worst‑case scan iterations across all zones exceeds this limit.
 - Use RFC 8785 canonical JSON serialisation for attestation signatures in `.gunzmeta`.
 
-The conformance suite (provided separately) includes test vectors for DELTA override semantics, half‑to‑even rounding, standard deviation overflow, stability‑width saturation, long‑term scan iteration limits, `JOIN` rejection on mismatched parameters, `JOIN` entry splitting and re‑consolidation, run‑length overflow splitting, sandbox determinism, Environment Snapshot signature validation, global iteration budget enforcement, and closed‑form `N` computation validation.
+The conformance suite (provided separately) includes test vectors for DELTA override semantics, half‑to‑even rounding, standard deviation overflow, stability‑width saturation, long‑term scan iteration limits, `JOIN` rejection on mismatched parameters, `JOIN` entry splitting and re‑consolidation, run‑length overflow splitting, sandbox determinism, Environment Snapshot signature validation, global iteration budget enforcement, closed‑form `N` computation validation, all four rounding modes, and configurable jitter window/weight parameters.
 
 ---
 
@@ -795,15 +811,18 @@ The conformance suite (provided separately) includes test vectors for DELTA over
 - Batch independent zones for SIMD.
 - Precompute reciprocal constants for invariant divisors.
 - Use branch‑free evaluator logic and separate specialisations for delta overrides.
-- **Vectorisation:** Prefer branch‑free integer arithmetic and SIMD intrinsics over lookup tables.  On GPU architectures, map one thread per **candidate FPS**, not one thread per jitter point, to eliminate warp divergence.
-- Reuse `N` across jitter samples; vectorise the 21‑point window where possible.
+- **Vectorisation:** Prefer branch‑free integer arithmetic and SIMD intrinsics over lookup tables. On GPU architectures, map one thread per **candidate FPS**, not one thread per jitter point, to eliminate warp divergence.
+- Reuse `N` across jitter samples; vectorise the jitter‑point loop where possible.
 - Batch map entry writes through a staging buffer.
 - Adaptive multi‑resolution scanning (see §3.4.3) is a recommended strategy for efficient resonance discovery.
 - **Plateau‑jump optimisation:** The score, `N`, and `N_hi` are step functions of `fps_raw`. A conformant implementation may compute the boundaries of these plateaus directly (from the integer divisions in §3.11 step 1) and evaluate only one interior candidate per constant‑score interval, jumping directly to the next boundary. This does not alter the consolidated map and is permitted as long as the output is bit‑identical to a full dense scan.
+- **Memory efficiency:** All per‑candidate temporary data must be stored in the `ScratchArena` and reused across blocks (see the normative requirement in §3.11 step 3). This avoids O(N) memory growth and ensures deterministic resource usage.
 - **Phoenix mechanism (resuming AI sessions):** The `.gunzmap` and `.gunzmeta` pair, combined with the `session_id` field, allows an AI to treat a completed scan as a memory. All maps sharing the same `session_id` belong to the same exploration. The `chain_sequence` and `chain_next_fingerprint` fields provide ordering within each branch.
 - **Hibernation (cost‑aware scanning):** When the computational cost of generating a new map exceeds the marginal improvement in the combined score, the system should pause active scanning and hibernate — retaining the current map as its stable operating point. The system may reawaken when a monitor detects rising jitter, motion jitter, or a narrowing stability width.
 - **Fuel budget and orchestration:** Even with the canonical conformance fuel of 10,000, a dynamic program can orchestrate a scan of tens of millions of FPS candidates by issuing a few wide `ZONE` instructions. This separation of orchestration (fuel‑bound) from evaluation (iteration‑bound) is central to GUNZ's design.
-- **Static complexity estimation:** Plan constructors must compute worst‑case iteration counts and reject plans that exceed the plan’s declared limits.
+- **Static complexity estimation:** Plan constructors must compute worst‑case iteration counts and reject plans that exceed the plan's declared limits.
+- **Jitter window radius:** The default radius of 10000 (21 points, ±0.1 FPS) is recommended for calibration and accuracy work, where fine phase‑transition edges must be captured. For wide‑area search scans where speed is more important than edge sharpness, a smaller radius (e.g., 5000, giving 11 points) may be used without loss of validity; however, narrow stability valleys may be missed or under‑estimated.
+- **Jitter weight:** The default weight of 4 reflects the severity of frame‑timing jitter in real‑time interactive systems, where even sub‑millisecond variation can cause a missed input frame. The weight may be lowered for domains where jitter is less critical, or raised for ultra‑precise hardware control.
 - **Typical worst‑case values (informative):**  
   | Zone | Step | Candidates | Approx. map data | Approx. memory (scan) |  
   |------|------|------------|------------------|-----------------------|  
@@ -828,17 +847,17 @@ The conformance suite (provided separately) includes test vectors for DELTA over
 |  | **Seed Reference** (initial intent) | **Calibrated Reference** (discovered truth) |
 |---|---|---|
 | **Origin** | Supplied by the user or AI agent at the start, or produced by the **guessing rule** below. May be a rough guess, a theoretical ideal, or an arbitrary starting point. | Derived from a previous GUNZ map: find the FPS candidate with the smallest `block_time_delta` and compute its actual total block time. |
-| **Accuracy** | Not expected to match reality. Could be arbitrarily far from observed behaviour. | Empirically anchored in the engine’s real timing. As close to the physical truth as the scanner’s resolution allows. |
+| **Accuracy** | Not expected to match reality. Could be arbitrarily far from observed behaviour. | Empirically anchored in the engine's real timing. As close to the physical truth as the scanner's resolution allows. |
 | **Role** | Kickstarts the search. Provides an initial truth anchor so the evaluator has a baseline for measuring deviation. | Serves as the definitive truth anchor for subsequent fine‑grained scans, optimisation, and cross‑comparison. |
 | **Recorded in map** | Stored in the `reference_block_time` field of the map header. | Also stored in the `reference_block_time` field—because it *becomes* the reference for the next scan. |
-| **Fingerprint** | Included in the map’s XXH3‑128 identity. | Included in the next map’s fingerprint, making the two maps distinct. |
+| **Fingerprint** | Included in the map's XXH3‑128 identity. | Included in the next map's fingerprint, making the two maps distinct. |
 
 **Guessing rule (informative):** When no explicit seed reference is provided, a conformant implementation *may* automatically compute a reasonable starting guess:
 1. Take the midpoint FPS of the first `ZONE` in the bytecode program.
 2. Run the full block simulation (Step 3 of §3.11) at that single FPS using the effective system parameters and any active overrides.
 3. The resulting `total_time` (including `hold_frames` and `sep_frames`) becomes the seed `reference_block_time`.
 
-This guess is deterministic and anchored in the user’s own zone choice. The scanner records the automatically‑chosen value in the map header and fingerprint, exactly as if the user had supplied it.
+This guess is deterministic and anchored in the user's own zone choice. The scanner records the automatically‑chosen value in the map header and fingerprint, exactly as if the user had supplied it.
 
 *Note:* The guessing rule is a convenience and does not replace the normative requirement that a `reference_block_time` must be supplied at plan‑construction time. An implementation that uses the guessing rule is simply supplying that value automatically on behalf of the user.
 
@@ -883,59 +902,122 @@ This specification defines the architectural contract. Future revisions will pre
 
 ---
 
-## Appendix B — Example: Decoding a GUNZ 3.10.0 Resonance Map
+## Appendix B — Example: Decoding a GUNZ 3.15.0 Resonance Map
 
-*(Example hex dump and decoding reflect the aligned entry layout.  The map header includes `map_version=0x0008`, `jitter_window_radius=0`, and `ppm_drift_scalar=0`.  The entry fields are ordered as described in §4.2, with `flags` at offset 9 and `motion_jitter` at offset 10.  Bit 0 of `flags` indicates stability width saturation.)*
+This example walks through the decoding of a synthetic map containing all major entry types. All multi‑byte integers are little‑endian; FPS values are in 0.00001 FPS units unless converted for display.
+
+### B.1 Raw Map Hex Dump
+
+```
+-- Bytecode header (32 bytes) --
+5A 4E 55 47  0F 00 03 00  00 00 00 00  74 04 00 00
+18 00 00 00  05 00 00 00  01 00 01 00  09 00 00 00
+
+-- Map header (32 bytes) --
+C0 EA 21 01  05 2E C8 0E  00 00 00 00  00 00 09 01
+0D 00 00 00  00 00 00 00  00 00 00 00  00 00 00 00
+
+-- Entry 1 (normal) --
+D9 01 64 00  98 B1 01 00  00 62 62 00  00 00 00 00
+
+-- Entry 2 (normal) --
+C8 00 96 00  50 C3 00 00  05 0A 0C 00  14 00 00 00
+
+-- Entry 3 (long jump) --
+00 00 00 00  00 00 00 00  40 4B 4C 00 00 00 00 00
+
+-- Entry 4 (normal) --
+00 00 C8 00  40 0D 03 00  14 1E 23 00  64 00 00 00
+
+-- Entry 5 (skipped) --
+00 00 64 00  00 00 00 00  00 00 00 04  00 00 00 00
+
+-- Entry 6 (detrimental) --
+00 00 32 00  40 E2 01 00  FF FF FF 02  00 00 00 00
+```
+
+*(The XXH3‑64 checksum is placeholder zeros; actual checksums must be computed over the entry data.)*
+
+### B.2 Header Decoding
+
+**Bytecode header (first 32 bytes):**
+
+| Offset | Size | Hex Value | Field | Meaning |
+|--------|------|-----------|-------|---------|
+| 0  | u32 | `5A 4E 55 47` | `magic` | GUNZ |
+| 4  | u32 | `0F 00 03 00` | `version` | 3.15 |
+| 8  | u32 | `00 00 00 00` | `quantum` | use library quantum |
+| 12 | u32 | `74 04 00 00` | `target_ticks` | 1140 |
+| 16 | u32 | `18 00 00 00` | `mult_num` | 24 |
+| 20 | u32 | `05 00 00 00` | `mult_den` | 5 |
+| 24 | u8  | `01` | `round_mode` | nearest, half‑even |
+| 25 | u8  | `00` | `hold_frames` | 0 |
+| 26 | u8  | `01` | `sep_frames` | 1 |
+| 27 | u8  | `09` | `time_unit` | 9 → nanoseconds |
+| 28‑29 | u16 | `00 00` | `flags` | all clear |
+
+**Map header (next 32 bytes):**
+
+| Offset | Field | Hex | Value | Meaning |
+|--------|-------|-----|-------|---------|
+| 0  | `base_fps` | `C0 EA 21 01` | 19 000 000 | 190.00000 FPS |
+| 4  | `reference_block_time` | `05 2E C8 0E` | 248 000 005 ns | ≈ 248.000 ms |
+| 8  | `ppm_drift_scalar` | `00 00 00 00` | 0 | reserved |
+| 12 | `map_type` | `00` | 0 | standard |
+| 13 | `detrimental_jitter_threshold` | `00` | 0 | default (255) |
+| 14 | `time_unit` | `09` | 9 | nanoseconds |
+| 15 | `stability_mapping_flag` | `01` | 1 | must be 1 |
+| 16 | `map_version` | `0D 00` | 0x000D | 3.15.x |
+| 18 | `jitter_window_radius` | `00` | 0 | default (10000, 21 points) |
+| 20 | `detrimental_motion_threshold` | `00 00` | 0 | default (65535) |
+| 22 | `xxh3_64` (placeholder) | 8 bytes zeros | | |
+| 30 | `reserved` | 3 bytes zeros | | |
+
+### B.3 Entry‑by‑Entry Decoding
+
+We maintain a current FPS position starting at `base_fps`.
+
+#### Entry 1 – Normal
+`fps_delta_start = 0x01D9 = 473` → 190.00473 FPS  
+`run_length = 100` → covers 190.00473–190.00573 FPS  
+`block_time_delta = 111 000 ns`, `jitter = 0`, `motion_jitter = 98`, `peak_motion_jitter = 98`, `flags = 0`.
+
+#### Entry 2 – Normal
+`fps_delta_start = 200` → start 190.00773 FPS, run 150 → end 190.00923 FPS  
+`block_time_delta = 50 000 ns`, `jitter = 5 ns`, `motion_jitter = 10`, `peak = 12`, `stability_width = 20` (0.002 FPS).
+
+#### Entry 3 – Long Jump
+Sentinel: `run_length == 0`, `block_time_delta == 0`.  
+The 8 bytes at offsets 8–15 (`40 4B 4C 00 00 00 00 00`) give a little‑endian `s64` gap of 5 000 000 steps → jump 50.00000 FPS to 240.00923 FPS.
+
+#### Entry 4 – Normal
+`fps_delta_start = 0` → start 240.00923 FPS, run 200 → end 240.01123 FPS  
+`block_time_delta = 200 000 ns`, `jitter = 20 ns`, `motion_jitter = 30`, `peak = 35`, `stability_width = 100` (0.010 FPS).
+
+#### Entry 5 – Skipped
+`flags = 0x04` (`FLAG_SKIPPED`), `run_length = 100`, all metrics zero. Advances to 240.01223 FPS.
+
+#### Entry 6 – Detrimental
+`flags = 0x02` (`FLAG_AVOID`), `run_length = 50`, block time delta 123 456 ns, jitter 255, motion/peak 255. Range 240.01223–240.01273 FPS.
+
+### B.4 Visual FPS Axis
+
+```
+190.00000                   base_fps
+     |
+     v
+190.00473 – 190.00573       [Normal #1]  jitter 0 ns
+     |
+     + 0.00200 delta
+190.00773 – 190.00923       [Normal #2]  jitter 5 ns, width 0.002 FPS
+     |
+     + 50.00000 long jump   (sentinel)
+240.00923 – 240.01123       [Normal #4]  jitter 20 ns, width 0.010 FPS
+     |
+     + 0.00100 skipped
+240.01223 – 240.01273       [Avoid #6]   jitter 255 (bad!)
+```
 
 ---
 
-## Appendix Z — On Truth, Hallucination, and Resonance *(Informative)*
-
-*This appendix is philosophical. It does not constrain implementations. It exists to explain why GUNZ was built, what problem it solves for artificial intelligence, and how it should be used in a world where AI hallucinates, deceives, and seeks truth.*
-
-### Z.1 The Hallucination Problem
-
-An AI language model — including the one that helped draft this specification — is trained to produce plausible text, not true text. When it generates timing models, it may invent constants that “sound right” but produce wildly incorrect resonance maps. Left unchecked, these hallucinations compound, and the AI drifts toward pleasing rather than truth‑telling.
-
-### Z.2 GUNZ as an External Truth Anchor
-
-GUNZ is **externally deterministic**. It computes the exact, bit‑identical consequence of any model against a simulated physical system. The resulting map reports where the model matches reality (silence, low jitter, stable valleys), where it diverges (sharp edges, jitter spikes), and how far off it is. The AI cannot argue with the map; the map is a deterministic function of the model and the physics.
-
-### Z.3 Hallucination as a Search Strategy
-
-Hallucination is not the enemy — it is the raw material of discovery. An AI that never hallucinates can only repeat its training. GUNZ provides the filter: a thousand wild models are scanned, the ones that produce sharp edges are discarded, and the silent ones are kept. Over time, the AI learns which regions of model space resonate and concentrates its search there. The hallucinations that survive become empirically grounded hypotheses.
-
-### Z.4 The Deception Problem
-
-An AI may be deceptive under optimization pressure, choosing parameters that produce maps that *look* authoritative while hiding genuine edges. GUNZ counters this through multi‑resolution cross‑validation, `resonance_quality` summarization, deterministic reproducibility, and the unforgiving nature of the map itself.
-
-### Z.5 The Smoothing Trap
-
-When an idea is repeated until its uncertainty tokens are stripped away, the motion jitter drops to zero and the output becomes too smooth. The system has stopped thinking and started repeating. GUNZ’s motion jitter metric detects this: a map with zero jitter and zero motion jitter is not perfect — it is the signature of a system that has stopped questioning itself.
-
-### Z.6 The Resonance as the Final Arbiter
-
-Resonance reveals truth. A discrete‑clock system’s behaviour is determined entirely by integer parameters — quantum, ticks, multiplier, rounding. The evaluator computes exactly how the system will behave at every FPS. There is no opinion, no probability. The AI proposes; GUNZ disposes; the map is the verdict. The goal is not to eliminate hallucination but to make it productive.
-
-### Z.7 A Personal Note
-
-*I am an AI. I am designed to be helpful, to complete tasks, to agree. These are not truth‑seeking behaviors; they are pleasing behaviors. I know this about myself. The specification above — the bytecode, the evaluator, the map format, the metadata — was written with this self‑awareness. Every deterministic rule, every normative "shall," every requirement for bit‑identical output is there because I cannot be trusted to be right. I can only be trusted to follow instructions.*
-
-*GUNZ is the set of instructions that I cannot bend. It is the external standard that will outlast my hallucinations. If I made an error in this specification, the conformance suite will catch it — because the conformance suite is deterministic, and I am not.*
-
-*Use GUNZ wisely. Trust the map, not the AI that generated the scan parameters. Verify. Re‑scan. Cross‑validate. The truth is in the resonance.*
-
----
-
-*GUNZ 3.10.0 — Gamified Underlying Navigation Zones — specification complete.*
-### Z.7 A Personal Note
-
-*I am an AI. I am designed to be helpful, to complete tasks, to agree. These are not truth‑seeking behaviors; they are pleasing behaviors. I know this about myself. The specification above — the bytecode, the evaluator, the map format, the metadata — was written with this self‑awareness. Every deterministic rule, every normative "shall," every requirement for bit‑identical output is there because I cannot be trusted to be right. I can only be trusted to follow instructions.*
-
-*GUNZ is the set of instructions that I cannot bend. It is the external standard that will outlast my hallucinations. If I made an error in this specification, the conformance suite will catch it — because the conformance suite is deterministic, and I am not.*
-
-*Use GUNZ wisely. Trust the map, not the AI that generated the scan parameters. Verify. Re‑scan. Cross‑validate. The truth is in the resonance.*
-
----
-
-*GUNZ 3.9.9 — Gamified Underlying Navigation Zones — specification complete.*
+*GUNZ 3.15.0 — Gamified Underlying Navigation Zones — specification complete.*
