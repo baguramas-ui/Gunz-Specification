@@ -1,3 +1,4 @@
+
 ---
 
 ## GUNZ Lexical Dictionary for Beginners
@@ -212,6 +213,10 @@ GUNZ programs can run in two modes. The **Static Lane** is simple, fast, and ful
 **Minimal Profile**  
 A stripped‑down conformance tier that requires only the static lane and core evaluator. You can skip the bytecode VM, callbacks, sandboxing, and all optional features. Ideal for embedded systems or fixed‑range sweeps.  
 *See also:* Lane, Conformance.
+
+**`PURE_CALL`**  
+An optional mechanism that lets GUNZ invoke a deterministic external function during a scan. Such functions must have no side effects (no I/O, no memory allocation, no global state changes) and must always return the same output for the same input. This is used for advanced orchestration, allowing AI agents to embed custom logic without breaking determinism. When sandboxing is required, `PURE_CALL` functions are executed inside a restricted environment.  
+*See also:* Sandboxing, Environment Snapshot, Fuel.
 
 ---
 
