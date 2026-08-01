@@ -1,6 +1,3 @@
-[lexical dictionary.txt](https://github.com/user-attachments/files/30392355/lexical.dictionary.txt)
-The forge is quiet as I lay out the merged companion file. I've taken your original entries, incorporated the new definitions where they added clarity, removed duplicates, and kept only what a true beginner would need. The result is below.
-
 ---
 
 ## GUNZ Lexical Dictionary for Beginners
@@ -9,229 +6,346 @@ The forge is quiet as I lay out the merged companion file. I've taken your origi
 
 ---
 
-**Advance (`adv_lo` / `adv_hi`)**  
-The number of clock ticks a single frame contributes to reaching the target. In every animation block, there are two types of frames: *short* frames (`adv_lo`) and *long* frames (`adv_hi`). The advance value depends on the frame time, the clock quantum, and the multiplier.
-
-**Arena / ScratchArena**  
-A temporary workspace where the scanner stores intermediate results. Think of it as a stack of sticky notes that can be torn off in one go, instead of having to erase each note individually. It keeps the scanner fast and memory‑efficient.
-
-**Attestation**  
-A cryptographic proof that a map was produced by a specific runtime and that any callbacks were executed in a sandboxed environment. It uses digital signatures (Ed25519) to guarantee the map's provenance.
-
-**Base FPS (`base_fps`)**  
-The starting frequency of a scan, expressed in units of 0.00001 FPS. All other FPS positions in the map are stored as offsets from this base.
-
-**Big‑endian / Little‑endian**  
-Different conventions for storing numbers that take up more than one byte. Little‑endian puts the smallest part first (like writing the date as 27‑07‑2026 instead of 2026‑07‑27). GUNZ always uses little‑endian, so tools must read it that way.
-
-**Block Time**  
-The total length of time it takes for a system to complete one full cycle (e.g., one animation loop). In GUNZ, the evaluator calculates this for each candidate FPS and compares it against the expected ideal `reference_block_time`.
-
-**Bytecode / ISA / Opcode**  
-The low‑level instruction language that GUNZ uses to describe a scan. The **ISA** (Instruction Set Architecture) is the complete set of instructions the scanner understands. An **opcode** is the part of an instruction that specifies which operation to perform. You don't need to write bytecode yourself; an AI, a library, or a tool can generate it. If you are only using GUNZ's Minimal Profile, you can ignore these entirely.
-
-**Callback (`PURE_CALL`)**  
-An optional, external function that GUNZ can call during a scan. It must be completely deterministic (always returns the same result for the same inputs) and have no side effects (no reading files, no network, no random numbers). This is only used in advanced orchestration; basic users never need to write one.
-
-**CBOR (Concise Binary Object Representation)**  
-A compact binary data format used for the optional Environment Snapshot. Think of it as a binary version of JSON that is faster to parse.
-
-**cgroup (Control Group)**  
-A Linux kernel feature that limits and isolates the resource usage (CPU, memory, disk I/O, network) of a collection of processes. GUNZ can use cgroups to enforce resource limits on sandboxed callbacks.
-
-**Conformance / Conformance Suite**  
-A set of tests that prove a GUNZ implementation behaves exactly as the specification demands. A conformant scanner produces bit‑identical outputs for the same inputs.
-
-**Consensus Answer (used in Dam)**  
-In the semantic scanner (Dam), the consensus answer is the single generated text (out of many runs) that has the best combined score for length alignment and structural repetition. All other answers are compared against this one to measure how much the model diverges from its own best guess.
-
-**Deduplicate**  
-A flag that tells the scanner to compare new maps against previously stored ones. If an identical map already exists, the scanner can skip generating a duplicate, saving time and storage.
-
-**Deterministic**  
-The property that the same input always produces the same output, on any machine, forever. GUNZ is completely deterministic—no randomness, no floating‑point differences.
-
-**Detrimental Threshold**  
-A cutoff value used in `map_type = 1` (detrimental mode). If the jitter or motion jitter exceeds this threshold, the map marks that FPS region with `FLAG_AVOID`. In GUNZ 3.15.0, there are separate thresholds for timing jitter and motion jitter.
-
-**Divergence (used in Dam)**  
-A metric that measures how far a model's outputs stray from its own best (consensus) answer. High divergence indicates inconsistent or hallucinatory behaviour.
-
-**Dynamic Lane** – See **Lane**.
-
-**Ed25519**  
-A modern digital signature algorithm based on elliptic curves, designed for high speed and high security. Ed25519 signatures are 64 bytes long and provide security equivalent to a 128‑bit symmetric key. GUNZ uses Ed25519 to sign metadata and attestation tokens, ensuring that a file really came from the claimed source and hasn't been altered.
-
-**Environment Snapshot**  
-An optional, signed snapshot of the runtime environment (hardware capabilities, library versions, etc.) that can be attached to a plan. It allows deterministic callback functions to read pre‑approved external data without violating purity.
-
-**Execution Plan (or Plan)**  
-The compiled, immutable blueprint of a scan. Once GUNZ reads the bytecode and merges the library parameters, it builds a Plan. The Plan is locked—it never changes—and can be reused safely by many threads at the same time. Think of it as a ready‑to‑run recipe.
-
-**EXPORT**  
-A bytecode instruction that writes the finished resonance map to a runtime object. The map's integrity is guaranteed by its XXH3‑64 checksum, not by the length hint.
-
-**Fingerprint (XXH3‑128, XXH3‑64)**  
-A unique, short digital fingerprint of a map or file. Like a human fingerprint, it identifies the exact content. GUNZ uses XXH3‑64 for quick integrity checks, and XXH3‑128 for global deduplication and map identity. The XXH3 algorithm is extremely fast and produces identical results on all platforms.
-
-**Firecracker**  
-A lightweight virtual machine monitor (VMM) developed by AWS that creates and manages microVMs. Firecracker microVMs combine the security isolation of traditional virtual machines with the speed and efficiency of containers. GUNZ can use Firecracker as a sandboxing mechanism for running callbacks in isolated environments.
-
-**Flags**  
-Bit‑sized on/off switches in the header or map entries that control features (e.g., `FLAG_AVOID`, `FLAG_SKIPPED`, `sparse_map`). They let the same file format carry different types of information without changing the structure.
-
-**Fuel**  
-A concept used only in the optional Dynamic Lane. Every instruction costs a little fuel; when fuel runs out, the bytecode interpreter stops. This prevents a program from looping forever and guarantees finite execution time.
-
-**Generation (Library Profile)**  
-A monotonically increasing version number attached to a library profile. It is assigned **only** by the offline library compiler. If you change the library's parameters, the generation number increases. This prevents old maps from being accidentally mixed with new, incompatible library definitions.
-
-**gVisor**  
-An open‑source application kernel that provides a strong isolation layer between running applications and the host operating system. GUNZ can use gVisor as a sandboxing mechanism for callbacks, limiting the host kernel surface accessible to the callback.
-
-**Half‑to‑even Rounding**  
-A way of rounding numbers that breaks ties by rounding to the nearest even integer. For example, 2.5 rounds to 2, and 3.5 rounds to 4. GUNZ uses this rule internally for all score computations to guarantee determinism across all platforms.
-
-**Hibernation**  
-A cost‑aware strategy where the AI pauses active scanning when the computational cost of generating a new map exceeds the marginal improvement. The system retains the current map as its stable operating point and may reawaken when environmental drift is detected.
-
-**Hold Frames / Separation Frames**  
-Optional extra frames that GUNZ can insert after an animation reaches its target. `hold_frames` simulates a brief pause before the next action; `sep_frames` simulates a mandatory gap between animations.
-
-**IMPORT**  
-A bytecode instruction that reads an external map from a runtime object and merges it into the current scan. The map's XXH3‑64 checksum is validated on import; if it doesn't match, the import is rejected. Both maps must share the same `time_unit` and `map_version`.
-
-**Jitter (Timing Jitter)**  
-A measure of how much the block time wobbles when you nudge the FPS very slightly (±0.1 FPS). Low jitter means the system is stable in that neighbourhood; high jitter means it's sensitive and unpredictable.
-
-**Jitter Weight**  
-A configurable multiplier (default 4) that lets you control how severely the scanner penalises timing jitter. A higher weight makes the scanner more sensitive to instability, which matters a lot in real‑time games where even a tiny jitter can cause a missed input frame.
-
-**Jitter Window**  
-The set of FPS points that the scanner evaluates around each candidate to calculate jitter. By default it's 21 points (±0.1 FPS), but GUNZ 3.15.0 allows you to make this window wider or narrower.
-
-**JOIN**  
-A bytecode instruction that intersects two maps. It scans both maps from left to right, splits entries at every boundary, and merges the results using a pessimistic rule (maximum of jitter, minimum of stability width). Both maps must share the same `time_unit`, `map_version`, `base_fps`, `step_fps`, and `reference_block_time`.
-
-**Lane (Static Lane / Dynamic Lane)**  
-GUNZ programs can be run in two modes. The **Static Lane** is a simple, fast, fully deterministic path suitable for most scans. The **Dynamic Lane** is an optional virtual machine that allows more complex, self‑modifying orchestration at the cost of some determinism.
-
-**LEB128 (Little‑Endian Base 128)**  
-A variable‑length integer encoding used in compressed statistics files (`.gunzstatz`). It stores small numbers in fewer bytes, saving space. Most beginners can ignore it.
-
-**Library Profile**  
-A pre‑defined collection of system parameters (quantum, multiplier, rounding, jitter weight, etc.) that can be shared and reused. Using a library profile saves you from retyping the same values for every scan.
-
-**Long‑jump Entry**  
-A special marker in the map that says "skip a very large gap here." Instead of storing millions of identical entries, the scanner stores one compact record that tells the reader how many FPS steps to jump forward. It is identified by the sentinel combination `run_length == 0` and `block_time_delta == 0`.
-
-**Long‑term Scan**  
-A scan mode where the evaluator simulates multiple consecutive blocks for each FPS candidate, accumulating statistics over a configured measurement window. The map entry stores the average block time and aggregate jitter over the entire window.
-
-**Map Entry (16‑byte Entry)**  
-The fundamental unit of a GUNZ resonance map. Each entry describes a consecutive range of FPS values and records the block time delta, jitter, motion jitter, stability width, and flags for that region.
-
-**Map Version (`map_version`)**  
-A number that identifies which revision of the map format is being used. GUNZ 3.15.0 maps use `map_version = 0x000D`. Decoders reject maps with an unknown version, which prevents accidental misinterpretation of future formats.
-
-**Metadata (`.gunzmeta`)**  
-A human‑readable JSON file that accompanies every `.gunzmap`. It records the exact parameters, zone definitions, and quality summary of the scan, so you (or an AI) can reproduce the scan years later.
-
-**Motion Jitter**  
-A measure of how much the per‑frame advance values vary within a single animation block. In a game, high motion jitter causes visible tremors. In GUNZ, it is expressed in ticks × 100 and is stored alongside timing jitter.
-
-**`N`, `N_hi`, `N_lo` (Frame Counts)**  
-Inside a single animation block, `N` is the **total number of frames** needed to reach the `target_ticks`. Among those `N` frames, `N_hi` is the count of *long* frames (using `adv_hi`), and `N_lo` is the count of *short* frames (using `adv_lo`). The formula `N = N_lo + N_hi` always holds.
-
-**Object Table / Object ID**  
-GUNZ uses a private lookup table to manage resources like maps, files, or network streams. Instead of using raw memory addresses (which are dangerous), the bytecode refers to resources using a 32‑bit `object_id`. Think of it as a library card catalog: you ask for item #42, and the runtime fetches it safely for you.
-
-**Peak Motion Jitter**  
-While `motion_jitter` is the *average* tremor inside a block, `peak_motion_jitter` is the **worst‑case** tremor among all the jitter points in the window. In a game, a high peak means that even if the average looks okay, the system might stutter violently at specific moments.
-
-**Phoenix Mechanism**  
-The ability to treat a completed scan as a save point. Because every map is linked to its metadata and can carry a chain of fingerprint links, an AI agent can resume an exploration from where it left off, even after a restart.
-
-**Plateau‑jump Optimisation**  
-An implementation technique that skips large regions where the score doesn't change. GUNZ allows this as long as the final map is bit‑identical to a full scan.
-
-**Playground**  
-A friendly name for a zone—a range of FPS values to explore, defined by `ZONE` in the bytecode. Think of it as the sandbox where the scanner plays.
-
-**PURE_CALL**  
-An optional mechanism that lets GUNZ call external, deterministic functions during a scan. These functions must have no side effects and must always return the same output for the same input.
-
-**Quantum**  
-The length of one clock tick, expressed in the base time unit (e.g., nanoseconds). **This has nothing to do with quantum mechanics or quantum computing.** It simply means "the smallest time step the system can measure."
-
-**Reference Block Time**  
-The ideal block time you expect the system to achieve. The scanner compares every FPS candidate against this value to calculate the `block_time_delta`. This is the "truth anchor" for a timing scan.
-
-**Reference Counting**  
-A simple way for GUNZ to manage memory safely across multiple threads. Every time a thread starts using an `ExecutionPlan`, it increases a counter (`Acquire`). When it finishes, it decreases the counter (`Release`). When the counter hits zero, GUNZ knows it is safe to delete the plan.
-
-**Resonance**  
-In GUNZ, resonance means alignment between the simulated discrete‑clock model and the desired ideal behaviour. A "resonant" FPS produces low jitter and a stable valley. Resonance is the game's truth signal.
-
-**RFC 8785 (JSON Canonicalization Scheme)**  
-A standard that defines a precise way to serialize JSON so that the same data always produces the identical byte sequence. GUNZ uses this for cryptographic signatures in `.gunzmeta`.
-
-**Rounding Mode (`round_mode`)**  
-Controls how fractions are turned into integers when computing frame advances and block times. Options are floor (round down), nearest half‑to‑even, ceiling (round up), and truncate. The choice affects the resonance map because it changes when the tick counter increments.
-
-**Run‑length**  
-The number of consecutive FPS steps that share identical metrics. Map entries merge these steps into a single `run_length` field, which keeps the file compact. The `run_length` field is a `u16` (0–65535); if a run would exceed this, the scanner splits it into multiple entries.
-
-**Sandboxing**  
-An optional security layer that executes callback functions inside a restricted environment that cannot read or write outside its own cage. GUNZ supports sandboxing for production multi‑tenant use, but it is not required for single‑user tools.
-
-**seccomp‑bpf**  
-A Linux kernel feature that allows a process to specify a filter for incoming system calls. GUNZ can use seccomp‑bpf to sandbox callbacks, preventing them from making dangerous system calls.
-
-**Sentinel**  
-A special, impossible combination of values used to signal "this is not a normal entry." For example, a long‑jump entry uses `run_length == 0` and `block_time_delta == 0` as a sentinel.
-
-**SIMD (Single Instruction, Multiple Data)**  
-A CPU feature that performs the same operation on multiple pieces of data simultaneously. For example, instead of adding two numbers one pair at a time, SIMD can add four pairs at once. GUNZ's evaluator can use SIMD to process multiple FPS candidates in parallel, dramatically speeding up scans.
-
-**SKIP_ZONE**  
-A bytecode instruction that skips evaluation of a playground. The scanner emits a placeholder entry (or a long‑jump entry for wide intervals) covering the full skipped range.
-
-**Stable Valley**
-Imagine two towering mountains of jitter and chaos. A human looks at this landscape and sees the mountains—the dangerous, dramatic peaks. The scanner looks at the same landscape and sees the quiet, flat ground between them. That flat ground is the stable valley. It's the safe region where the system hums smoothly, undisturbed by the peaks on either side. The scanner's job is to find this flatness and show you where it's safe to stand.
-
-**Sparse Map**  
-A map where regions with zero metrics are omitted to save space, and the offsets of the next entry are adjusted accordingly. This is an optional storage optimisation.
-
-**Stability Width**  
-The size (in FPS) of the region around a sweet spot where the score stays within a tiny tolerance. A wide stability width means the system will still perform well even if the actual FPS drifts slightly—think of it as the width of a flat valley.
-
-**Static Lane** – See **Lane**.
-
-**STREAM**  
-A bytecode instruction that enables streaming map output. Entries are emitted as they are computed, rather than waiting for the entire scan to finish. This reduces memory usage for very large scans.
-
-**Target Ticks (`target_ticks`)**  
-The finish line. The number of clock ticks that the system must accumulate to complete one full animation block. The evaluator counts advances until the total tick sum reaches or exceeds this number.
-
-**Time Unit (`time_unit`)**  
-A single number that tells GUNZ what base time scale to use. `time_unit = 0` means seconds, `3` means milliseconds, `6` means microseconds, `9` means nanoseconds, `12` means picoseconds. All timing values in the header and evaluator are expressed in that unit.
-
-**Truth Anchor**  
-The reference point that defines what "correct" means for a scan. In a timing scan, the truth anchor is the `reference_block_time`. In a semantic scan (Dam), it's the Canonical Keyphrase LUT. The Geas demands that we always measure truth relative to a stable, external anchor.
-
-**UTC (Coordinated Universal Time)**  
-The primary time standard by which the world regulates clocks and time. It is the same as Greenwich Mean Time (GMT) and is the time at longitude 0 degrees (the prime meridian). GUNZ uses UTC timestamps in `.gunzmeta` to ensure that creation times are unambiguous across time zones.
-
-**WebAssembly (Wasm)**  
-A safe, portable, low‑level binary instruction format for a stack‑based virtual machine. It is designed as a compilation target for programming languages, enabling deployment on the web and in other environments. WebAssembly provides a memory‑safe, sandboxed execution environment. GUNZ can use WebAssembly as a sandboxing mechanism for callbacks, running them in a safe, deterministic environment.
-
-**XXH3**  
-A family of very fast, non‑cryptographic hash functions. GUNZ uses XXH3‑64 for per‑map integrity and XXH3‑128 for global map fingerprints. XXH3 is portable—it has a generic C90 implementation that can be compiled on any platform, and all implementations produce exactly the same hash value.
-
-**Zone (or Playground)**  
-A specific, continuous range of FPS values that you want to scan—for example, from 30.00000 FPS to 60.00000 FPS. The bytecode `ZONE` instruction defines these boundaries. GUNZ evaluates every single FPS step inside this playground to build the resonance map.
+### 🚀 Quick Start: 10 Terms Every Beginner Should Know
+
+| Term | One‑Line Meaning |
+|------|------------------|
+| **Zone** | A frequency range you want to scan (e.g., 30 Hz to 60 Hz). |
+| **Block Time** | The total time a process takes to complete one full cycle. |
+| **Jitter** | How much the block time wobbles when you nudge the frequency slightly. |
+| **Motion Jitter** | How much the per‑cycle advance varies inside a single block. |
+| **Stability Width** | The width of the frequency range where the system stays stable. |
+| **Reference Block Time** | The ideal block time you expect—the “truth anchor.” |
+| **Resonance** | Alignment between the model and reality (low jitter, stable). |
+| **Map Entry** | A 16‑byte record that describes one region of the resonance map. |
+| **Deterministic** | Same input → same output, always, on any machine. |
+| **Quantum** | The duration of one clock tick (nothing to do with quantum physics). |
 
 ---
 
-*If a term is missing, check the full GUNZ 3.15.0 specification or the companion philosophy document. This lexicon is a living helper, not a normative standard.*
+### ⏱️ Core Timing Concepts
+
+**Advance (`adv_lo` / `adv_hi`)**  
+The number of clock ticks contributed by a single cycle. There are *short* cycles (`adv_lo`) and *long* cycles (`adv_hi`). The advance depends on the cycle time, the clock quantum, and the multiplier.  
+*See also:* `N`, `N_hi`, `N_lo`, Cycle Time.
+
+**Block Time**  
+The total duration of one complete cycle of the target process, measured from the start of the first tick to the end of the final tick (including any hold or separation cycles). The scanner compares this to the `reference_block_time` to compute `block_time_delta` (the absolute difference).  
+*See also:* Reference Block Time, `block_time_delta`.
+
+**Cycle Time (`T`)**  
+`T = 10^(time_unit + 5) / freq_candidate`. The time per frequency step, expressed in the base time unit. This is the foundation of all timing computations.  
+*See also:* Time Unit, Base Frequency.
+
+**Hold Cycles / Separation Cycles**  
+Optional extra cycles inserted after a block reaches its target. `hold_cycles` simulates a brief pause before the next action; `sep_cycles` simulates a mandatory gap between blocks.  
+*See also:* Block Time.
+
+**`N`, `N_hi`, `N_lo` (Cycle Counts)**  
+Inside a single block, `N` is the **total number of cycles** needed to reach `target_ticks`. `N_hi` is the count of *long* cycles (using `adv_hi`), and `N_lo` is the count of *short* cycles (using `adv_lo`).  
+`N = N_lo + N_hi`.  
+**Critical invariant:** `N_hi` must be in `[0, N]`; otherwise the candidate is invalid and gets `FLAG_AVOID`.  
+*See also:* Advance, Target Ticks, `d_lo_cont`, `d_hi_cont`.
+
+**Quantum**  
+The duration of one clock tick, expressed in the base time unit (e.g., nanoseconds). **This has nothing to do with quantum mechanics or quantum computing.** It simply means “the smallest time step the system can measure.”  
+*See also:* Time Unit.
+
+**Reference Block Time**  
+The ideal block time you expect the system to achieve. The scanner compares every candidate frequency against this value to calculate `block_time_delta`. This is the “truth anchor” for a timing scan.  
+*See also:* Block Time, Truth Anchor.
+
+**Target Ticks (`target_ticks`)**  
+The finish line. The number of clock ticks that the system must accumulate to complete one full block. The evaluator counts advances until the total tick sum reaches or exceeds this number.  
+*See also:* Advance, `N`.
+
+**Time Unit (`time_unit`)**  
+A single number that tells GUNZ what base time scale to use. `0` = seconds, `3` = milliseconds, `6` = microseconds, `9` = nanoseconds, `12` = picoseconds. All timing values in the header and evaluator are expressed in that unit. **Normative maximum:** `12`.  
+*See also:* Quantum, Cycle Time.
+
+---
+
+### 📊 Frequency & Mapping
+
+**Base Frequency (`base_freq`)**  
+The starting frequency of a scan, in 10⁻⁵ Hz units. All other frequency positions in the map are stored as offsets from this base.  
+*See also:* Zone, `freq_delta_start`.
+
+**`freq_delta_start`**  
+The offset (in 10⁻⁵ Hz) from the `base_freq` to the start of a map entry. When sparse maps are used, this field may accumulate the run lengths of previously omitted intervals.  
+*See also:* Map Entry, Sparse Map.
+
+**Map Entry (16‑byte Entry)**  
+The fundamental unit of a GUNZ resonance map. Each entry describes a consecutive frequency range and records `block_time_delta`, `jitter`, `motion_jitter`, `stability_width`, and flags.  
+*See also:* Run‑length, Long‑jump Entry.
+
+**Map Version (`map_version`)**  
+A number identifying which revision of the map format is being used. GUNZ 3.18.0 maps use `0x0010`. Decoders **must reject** maps with an unknown version—this prevents accidental misinterpretation of future formats.  
+*See also:* Conformance.
+
+**Run‑length**  
+The number of consecutive frequency steps that share identical metrics. Map entries merge these steps into a single `run_length` field (a `u16`, 0–65535). If a run exceeds 65535 steps, the scanner splits it into multiple entries.  
+*See also:* Map Entry, Long‑jump Entry.
+
+**Sparse Map**  
+A map where regions with zero metrics are omitted to save space. The offsets of the next entry are adjusted accordingly. When multiple consecutive intervals are omitted, their lengths accumulate into the `freq_delta_start` of the next non‑omitted entry. **Decoders must process entries sequentially** to reconstruct absolute frequencies; random access requires building an index first.  
+*See also:* Map Entry, `freq_delta_start`.
+
+**Stable Region / Stability Region**  
+Imagine two towering mountains of jitter and chaos. A human sees the dramatic peaks; the scanner sees the quiet, flat ground between them. That flat ground is the stable region—the safe frequency range where the system hums smoothly. Technically, it’s the largest interval where the score stays within a tiny tolerance of the best point.  
+*See also:* Stability Width, Resonance.
+
+**Stability Width**  
+The size (in 0.0001 Hz units) of the stable region around a sweet spot. A wide stability width means the system stays robust even if the actual frequency drifts slightly. Stored as a `u16`; the maximum representable value is 6.5535 Hz. If the true width exceeds this, the `STAB_SATURATED` flag is set.  
+*See also:* Stable Region, Flags.
+
+**Zone**  
+A specific, continuous range of frequencies you want to scan (e.g., from 30.00000 Hz to 60.00000 Hz). The bytecode `ZONE` instruction defines these boundaries. GUNZ evaluates every frequency step inside the zone.  
+*See also:* Base Frequency, `step_freq`.
+
+---
+
+### 📈 Jitter Metrics
+
+**Jitter (Timing Jitter)**  
+How much the block time wobbles when you nudge the frequency very slightly (±0.1 Hz). Low jitter = stable neighbourhood; high jitter = sensitive and unpredictable. Measured as a population standard deviation of block times across the jitter window, expressed in the base time unit (stored as a `u8`, saturated at 255).  
+*See also:* Jitter Window, Jitter Weight, Motion Jitter.
+
+**Jitter Weight**  
+A configurable multiplier (default 4) that controls how severely the scanner penalises timing jitter. Default is calibrated for real‑time systems where even sub‑millisecond jitter can cause a missed input or deadline. Range: 1–255.  
+*See also:* Jitter, Score.
+
+**Jitter Window**  
+The set of frequency points around each candidate used to calculate jitter. Default: 21 points (±0.1 Hz at 10⁻⁵ Hz resolution). Configurable via `jitter_window_radius`.  
+*See also:* Jitter, `jitter_window_radius`.
+
+**Motion Jitter**  
+How much the per‑cycle advance values vary inside a single block. High motion jitter causes visible or measurable tremors. Stored in **ticks × 100** (not base time units), saturated to 65535.  
+*See also:* Jitter, Peak Motion Jitter.
+
+**Peak Motion Jitter**  
+The **worst‑case** motion jitter among all points in the jitter window. Even if the average looks okay, a high peak means the system might stutter violently at specific moments. Same units as motion jitter (ticks × 100).  
+*See also:* Motion Jitter, Jitter Window.
+
+---
+
+### ⚙️ Algorithm Internals (Advanced Terms)
+
+These terms appear in §3.11 and are necessary for understanding the evaluator’s inner workings. Beginners can skip this section on first reading.
+
+**`d_lo_cont`, `d_hi_cont`**  
+The *continuous deltas* derived from the cycle time: `d_lo_cont = T / quantum` (floor), `d_hi_cont = d_lo_cont + 1`. They define how many ticks each cycle advances (the temporal pattern).  
+*See also:* Cycle Time, `adv_lo_cont`.
+
+**`adv_lo_cont`, `adv_hi_cont`**  
+The continuous advances: `adv_lo_cont = (d_lo_cont * mult_num) / mult_den` (floor). These are the tick contributions per short/long cycle after applying the multiplier.  
+*See also:* `d_lo_cont`, Advance.
+
+**`Q`**  
+`Q = R / quantum`, where `R` is the rounded block time. Used to compute `N_hi = Q − N * d_lo_cont`.  
+*See also:* `R`, `N_hi`.
+
+**`R`**  
+The rounded block time: `R = round(N * T / quantum) * quantum`. The rounding uses the current `round_mode`.  
+*See also:* Block Time, Rounding Mode.
+
+**`T_min`**  
+The cycle time at the **highest frequency** in a zone (`freq_high`). Used to derive `max_eval_iterations` in long‑term scans.  
+*See also:* Cycle Time, `max_eval_iterations`.
+
+**`N_max`**  
+The upper bound for `N`: `ceil(target_ticks / max(adv_lo_cont, adv_hi_cont, 1))`. Precomputed when deltas are invariant to speed up the search for `N`.  
+*See also:* `N`, `adv_lo_cont`.
+
+---
+
+### 🧠 Memory & Execution
+
+**Arena / ScratchArena**  
+A temporary workspace where the scanner stores intermediate results. Think of it as a stack of sticky notes that can be torn off in one go. It keeps the scanner fast and memory‑efficient.  
+*See also:* Execution Plan.
+
+**Execution Plan (or Plan)**  
+The compiled, immutable blueprint of a scan. Once GUNZ reads the bytecode and merges library parameters, it builds a Plan. The Plan never changes and can be reused safely by many threads at once.  
+*See also:* Arena, Reference Counting.
+
+**Reference Counting**  
+A simple way for GUNZ to manage memory safely across multiple threads. Every time a thread uses a Plan, it increases a counter (`Acquire`); when finished, it decreases the counter (`Release`). When the counter hits zero, GUNZ knows it is safe to delete the Plan.  
+*See also:* Execution Plan.
+
+---
+
+### 🎛️ Scan Control & Limits
+
+**`max_scan_iterations`**  
+Maximum number of candidates to evaluate **per zone** (default ≥ 16 777 216). Prevents runaway scans on enormous zones.  
+*See also:* Zone, `total_max_scan_iterations`.
+
+**`max_eval_iterations`**  
+Maximum number of blocks to simulate **per candidate** (default ≥ 65 536). In long‑term mode, this is derived dynamically from `window_duration` and `T_min`.  
+*See also:* Long‑term Scan, `T_min`.
+
+**`total_max_scan_iterations`**  
+Global iteration limit across **all zones** in a plan (default ≥ 67 108 864). Prevents denial‑of‑service via bytecode that expands into enormous workloads.  
+*See also:* Plan Construction, `max_scan_iterations`.
+
+**`window_duration`**  
+The total measurement window (in base time units) for long‑term scans. The evaluator accumulates statistics until cumulative block time reaches or exceeds this value. Normative maximum: 2³² base‑time units.  
+*See also:* Long‑term Scan, `max_eval_iterations`.
+
+---
+
+### 💾 Bytecode & Orchestration
+
+**Bytecode / ISA / Opcode**  
+The low‑level instruction language that GUNZ uses to describe a scan. The **ISA** (Instruction Set Architecture) is the complete set of instructions. An **opcode** is the part of an instruction that specifies which operation to perform. You don’t need to write bytecode yourself; an AI, a library, or a tool can generate it. If you’re using the Minimal Profile, you can ignore these entirely.  
+*See also:* Minimal Profile, Lane.
+
+**Fuel**  
+A concept used only in the optional Dynamic Lane. Every instruction costs a little fuel; when fuel runs out, the bytecode interpreter stops. This prevents a program from looping forever.  
+*See also:* Dynamic Lane.
+
+**Lane (Static Lane / Dynamic Lane)**  
+GUNZ programs can run in two modes. The **Static Lane** is simple, fast, and fully deterministic—perfect for most scans. The **Dynamic Lane** is an optional virtual machine that allows more complex, self‑modifying orchestration by AI agents.  
+*See also:* Fuel, Minimal Profile.
+
+**Minimal Profile**  
+A stripped‑down conformance tier that requires only the static lane and core evaluator. You can skip the bytecode VM, callbacks, sandboxing, and all optional features. Ideal for embedded systems or fixed‑range sweeps.  
+*See also:* Lane, Conformance.
+
+---
+
+### 🔐 Security & Integrity
+
+**Attestation**  
+A cryptographic proof that a map was produced by a specific runtime and that callbacks were sandboxed. Uses Ed25519 signatures to guarantee the map’s provenance.  
+*See also:* Ed25519, Sandboxing.
+
+**Deduplicate**  
+A flag that tells the scanner to compare new maps against previously stored ones. If an identical map already exists, the scanner can skip writing a duplicate.  
+*See also:* Fingerprint.
+
+**Ed25519**  
+A modern, high‑speed elliptic‑curve digital signature algorithm. Signatures are 64 bytes long, equivalent to 128‑bit symmetric security. GUNZ uses Ed25519 to sign metadata and attestation tokens.  
+*See also:* Attestation, Fingerprint.
+
+**Fingerprint (XXH3‑128, XXH3‑64)**  
+A unique, short digital fingerprint of a map or file. Like a human fingerprint, it identifies the exact content. GUNZ uses XXH3‑64 for quick integrity checks and XXH3‑128 for global deduplication and map identity. XXH3 is extremely fast and produces identical results on all platforms.  
+*See also:* Deduplicate, Attestation.
+
+**Flags**  
+Bit‑sized on/off switches in the header or map entries that control features (e.g., `FLAG_AVOID`, `FLAG_SKIPPED`, `sparse_map`). They let the same file format carry different types of information without changing the structure.  
+*See also:* Map Entry, Long‑jump Entry.
+
+**Long‑jump Entry**  
+A special marker in the map that says “skip a very large gap here.” Used for gaps larger than ±0.32767 Hz. Identified by the sentinel combination `run_length == 0` and `block_time_delta == 0`. The gap size is stored in the bytes that would normally hold jitter and motion jitter.  
+*See also:* Map Entry, Sentinel, `SKIP_ZONE`.
+
+**Sandboxing**  
+An optional security layer that executes callback functions inside a restricted environment (e.g., WebAssembly, Firecracker, gVisor). Required for production multi‑tenant use; not needed for single‑user tools.  
+*See also:* Attestation, `PURE_CALL`.
+
+**Sentinel**  
+A special, impossible combination of values used to signal “this is not a normal entry.” For example, `run_length == 0` and `block_time_delta == 0` signals a long‑jump entry.  
+*See also:* Long‑jump Entry.
+
+---
+
+### 🧩 General Concepts
+
+**Conformance / Conformance Suite**  
+A set of tests that prove a GUNZ implementation behaves exactly as the specification demands. A conformant scanner produces bit‑identical outputs for the same inputs.  
+*See also:* Deterministic, Minimal Profile.
+
+**Deterministic**  
+The property that the same input always produces the same output, on any machine, forever. This is **non‑negotiable** in GUNZ—floating‑point or randomness would break conformance.  
+*See also:* Conformance, Half‑to‑even Rounding.
+
+**Half‑to‑even Rounding**  
+A way of rounding numbers that breaks ties by rounding to the nearest even integer (2.5 → 2, 3.5 → 4). GUNZ uses this rule for all score computations to guarantee determinism across platforms.  
+*See also:* Deterministic, Rounding Mode.
+
+**Hibernation**  
+A cost‑aware strategy where the AI pauses active scanning when the computational cost of a new map exceeds the marginal improvement. The current map is retained as a stable operating point; the system can reawaken if drift is detected.  
+*See also:* Phoenix Mechanism.
+
+**Long‑term Scan**  
+A scan mode where the evaluator simulates multiple consecutive blocks for each candidate, accumulating statistics over a `window_duration`. The map entry stores average block time and aggregate jitter.  
+*See also:* `window_duration`, `max_eval_iterations`.
+
+**Metadata (`.gunzmeta`)**  
+A human‑readable JSON file that accompanies every `.gunzmap`. It records the exact parameters, zone definitions, and quality summary of the scan, so you (or an AI) can reproduce the scan years later. Minimal‑profile implementations are exempt from generating it.  
+*See also:* Map Entry, Fingerprint.
+
+**Phoenix Mechanism**  
+The ability to treat a completed scan as a save point. Using `session_id` and fingerprint chains, an AI agent can resume an exploration from where it left off, even after a restart.  
+*See also:* Hibernation, Metadata.
+
+**Plateau‑jump Optimisation**  
+An implementation technique that skips large regions where the score doesn’t change. Allowed as long as the final map is bit‑identical to a full scan. It does not interfere with stability width computation.  
+*See also:* Stability Width.
+
+**Resonance**  
+In GUNZ, resonance means alignment between the simulated discrete‑clock model and the desired ideal behaviour. A resonant frequency produces low jitter and a wide stable region.  
+*See also:* Stable Region, Jitter.
+
+**Rounding Mode (`round_mode`)**  
+Controls how fractions are turned into integers when computing cycle advances and block times. Options: 0 = floor, 1 = nearest half‑to‑even, 2 = ceil, 3 = truncate. The choice affects the resonance map.  
+*See also:* Half‑to‑even Rounding, Block Time.
+
+**Truth Anchor**  
+The reference point that defines what “correct” means for a scan. In a timing scan, it’s the `reference_block_time`. In a semantic scan (Dam), it’s the Canonical Keyphrase LUT. The Geas demands that we always measure truth relative to a stable, external anchor.  
+*See also:* Reference Block Time, Resonance.
+
+---
+
+### 📚 Dam‑Specific Terms (Semantic Scanner)
+
+These terms belong to the Dam specification, not GUNZ. They are included for readers exploring the broader ecosystem.
+
+**Consensus Answer (Dam)**  
+The single generated text (out of many runs) that has the best combined score for length alignment and structural repetition. All other answers are compared against it to measure divergence.
+
+**Divergence (Dam)**  
+A metric that measures how far a model’s outputs stray from its own best (consensus) answer. High divergence indicates inconsistent or hallucinatory behaviour.
+
+---
+
+### 🔣 Miscellaneous
+
+**Big‑endian / Little‑endian**  
+Different conventions for storing multi‑byte numbers. Little‑endian puts the smallest part first (like writing 27‑07‑2026 instead of 2026‑07‑27). GUNZ always uses little‑endian.
+
+**CBOR (Concise Binary Object Representation)**  
+A compact binary data format used for the optional Environment Snapshot. Think of it as a binary version of JSON that’s faster to parse.
+
+**Environment Snapshot**  
+An optional, signed, immutable snapshot of the runtime environment (hardware capabilities, library versions, etc.) bound into a plan. Allows `PURE_CALL` callbacks to read pre‑approved external data without violating purity.
+
+**Generation (Library Profile)**  
+A monotonically increasing version number attached to a library profile, assigned **only** by the offline library compiler. Prevents old maps from being accidentally mixed with new, incompatible definitions.
+
+**Library Profile**  
+A pre‑defined collection of system parameters (quantum, multiplier, rounding, jitter weight, etc.) that can be shared and reused.
+
+**Object Table / Object ID**  
+GUNZ uses a private lookup table to manage resources. Instead of raw memory addresses, the bytecode uses a 32‑bit `object_id`—like a library card catalog.
+
+**RFC 8785 (JSON Canonicalization Scheme)**  
+A standard that defines a precise way to serialize JSON so the same data always produces identical bytes. GUNZ uses this for cryptographic signatures in `.gunzmeta`.
+
+**SIMD (Single Instruction, Multiple Data)**  
+A CPU feature that performs the same operation on multiple data points simultaneously (e.g., adding four pairs at once). GUNZ can use SIMD to speed up scans.
+
+**UTC (Coordinated Universal Time)**  
+The primary world time standard (same as GMT). GUNZ uses UTC timestamps in `.gunzmeta` to avoid time‑zone confusion.
+
+**WebAssembly (Wasm)**  
+A safe, portable binary instruction format for a stack‑based virtual machine. GUNZ can use WebAssembly as a sandboxing mechanism for callbacks.
+
+**XXH3**  
+A family of very fast, non‑cryptographic hash functions. GUNZ uses XXH3‑64 for per‑map integrity and XXH3‑128 for global map fingerprints. XXH3 is portable and produces identical results on all platforms.
+
+---
+
+*If a term is missing, check the full GUNZ 3.18.0 specification or the companion philosophy document. This lexicon is a living helper, not a normative standard.*
