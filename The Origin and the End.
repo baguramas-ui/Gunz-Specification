@@ -1,13 +1,4 @@
 
-GUNZ 3.15.0 (Gamified Underlying Navigation Zones) is a deterministic, offline‑scanner runtime for discrete‑clock systems. It produces compressed resonance maps — **stability topographies** — that describe optimal operating frequencies for any process governed by a fixed‑quantum clock. The format targets AI‑driven feedback loops, heterogeneous hardware deployment, and long‑term archival.
-
-If you are looking for the specification, check the release page or 
-
-https://github.com/baguramas-ui/Gunz-Specification/blob/main/Gamified%20Underlying%20Navigation%20Zones%203.15.0
-
-
-This file is about my life, it's unusual, personal and it is not required to understand the specification. 
-
 # Foreword: On the Game of Truth
 
 *This foreword is not normative. It exists to explain the soul of the project.*
