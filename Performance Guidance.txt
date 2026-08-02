@@ -1,9 +1,4 @@
-Here is the complete, stand‑alone **GUNZ 3.26 Performance Implementation Guide**.  
-All previously abbreviated sections are fully expanded. No “…” placeholders remain.
-
----
-
-**GUNZ 3.26 — Performance Implementation Guide (Informative)**  
+# GUNZ 3.35.0 — Performance Implementation Guide (Informative)
 
 *How to build a high‑performance, conformant GUNZ dense scanner — safely and deterministically.*
 
@@ -24,21 +19,55 @@ The techniques described in this guide can accelerate the dense scanner by **10�
 
 ---
 
-## 3. The landscape of conformant optimisations
+## 3. What’s new in 3.35.0 — impact on performance
 
-All techniques below are safe and conformant.
+The 3.35.0 specification incorporates all refinements from 3.28 through 3.34, plus several final patches. Here are the changes most relevant to performance‑oriented implementers:
 
-| Rank | Technique | Typical Speed‑up | Section |
-|------|-----------|------------------|---------|
-| 1 | **Plateau‑jump (window‑aware) + plateau‑based cache filling** | 10–500× (combined) | §3.1, §3.2 |
-| 2 | **Per‑frequency block‑data cache + sliding‑window jitter** | ~20× (block sims) | §3.2 |
-| 3 | **Closed‑form advance regularity** | (already fast) | §3.3 |
-| 4 | **SIMD vectorisation of the jitter window** | 1.5–4× | §3.4 |
-| 5 | **Narrow integer arithmetic (64‑bit paths)** | 1.5–2× | §3.5 |
+| Change | Impact |
+|--------|--------|
+| **`step_freq` in map header (bytes 10‑11)** | Decoders can directly obtain the scan step size without parsing `.gunzmeta`; the overflow sentinel `0xFFFF` must be handled. No performance impact for the evaluator. |
+| **`step_freq` in fingerprint** | Added to the XXH3‑128 input; map identity now depends on the exact step size. No performance impact. |
+| **`jitter_window_radius` now in library profile** | The spatial jitter window can be configured per library, up to 255 × 1000 = 255 000 steps. Larger windows increase per‑candidate work linearly. |
+| **Zones must be strictly disjoint, including `SKIP_ZONE`** | Simplifies merge ordering; overlapping zones are rejected at plan construction, avoiding nondeterministic interleaving. |
+| **`JOIN` compatibility now includes `map_type` and detriment thresholds** | Ensures joined maps share the same marking semantics. No performance impact. |
+| **`ADVANCE` both numerator and denominator checked non‑zero** | Prevents a hardware fault; no performance impact. |
+| **Run‑length overflow split: subsequent piece `freq_delta_start = 0`** | Clarifies spatial continuity; no performance impact. |
+| **`LOOP` bounds‑check** | Prevents buffer overread; no performance impact. |
+| **Override `block_time` 128‑bit arithmetic mandatory** | Matches the standard path; no performance impact if 128‑bit operations are already used. |
+| **`step_freq` overflow sentinel `0xFFFF`** | Map writers must emit `0xFFFF` when the true step exceeds 65535; decoders must reject the map if no `.gunzmeta` is available. |
+
+None of these changes alter the core scanning algorithm. The plateau‑jump and cache techniques remain identical.
 
 ---
 
-### 3.1 Plateau‑jump — skip only when the entire jitter window is safe
+## 4. The jitter window radius
+
+The jitter window radius `R` is derived from the map header’s `jitter_window_radius` field (byte 18) or from the library profile.
+
+- If the stored value is `0`, the default radius **10000** (21 points, ±0.1 Hz) is used.
+- If the stored value is non‑zero, the actual radius in 10⁻⁵ Hz units is **`stored_value × 1000`**.
+
+The jitter offsets Δ are generated as `-R, -R+1000, -R+2000, …, +R`. All offsets are multiples of 1000 (in 10⁻⁵ Hz units). This is a critical property for cache alignment.
+
+When a candidate is near `freq = 1`, some offsets would be non‑positive; those points are silently skipped and the effective window shrinks. The standard‑deviation computation must use the actual number of valid points.
+
+---
+
+## 5. The landscape of conformant optimisations
+
+All techniques below are safe and conformant with **GUNZ 3.35.0**.
+
+| Rank | Technique | Typical Speed‑up | Section |
+|------|-----------|------------------|---------|
+| 1 | **Window‑aware plateau‑jump + plateau‑based cache filling** | 10–500× (combined) | §5.1, §5.2 |
+| 2 | **Per‑frequency block‑data cache + sliding‑window jitter** | ~20× (block sims) | §5.2 |
+| 3 | **Closed‑form advance regularity** | (already fast) | §5.3 |
+| 4 | **SIMD vectorisation of the jitter window** | 1.5–4× | §5.4 |
+| 5 | **Narrow integer arithmetic (64‑bit paths)** | 1.5–2× | §5.5 |
+
+---
+
+### 5.1 Window‑aware plateau‑jump — skip only when the entire jitter window is safe
 
 #### Why it works
 
@@ -50,11 +79,12 @@ Inside a plateau of width `W` steps, the interior candidates that are at least `
 
 #### How to implement
 
-1. **Enumerate constant‑`N`/`N_hi` intervals** over the whole zone using closed‑form inequalities (see below).
+1. **Enumerate constant‑`N`/`N_hi` intervals** over the whole zone using closed‑form inequalities (see §7).
 2. For each interval of width `W` (in frequency steps):
    - **Left edge zone** — evaluate every candidate from the interval start up to `R‑1` steps, inclusive.
    - **Interior** — if `W ≥ 2R+1`, choose the centre candidate, evaluate it **once**, and emit a single map entry with `run_length = W − 2R`. Do not evaluate the remaining interior points.
    - **Right edge zone** — evaluate the last `R` candidates step by step.
+   - **Small plateau** — if `W < 2R+1`, evaluate **all** candidates in the interval step‑by‑step. No skipping is possible; the plateau is too narrow to guarantee the entire jitter window remains within the constant‑`N`/`N_hi` region.
 3. Continue to the next interval.
 
 This respects the jitter window and guarantees bit‑identical output.
@@ -64,35 +94,49 @@ This respects the jitter window and guarantees bit‑identical output.
 The constant‑`N`/`N_hi` intervals are those where both `d_lo_cont` and `N_hi` remain unchanged.  
 The boundary occurs where `round(N * T / quantum)` steps to the next integer, which depends on the active `round_mode`. A conformant implementation pre‑computes all such transition frequencies at plan‑construction time using integer arithmetic.
 
-*(Note: The companion anti‑spec `UNSOLVE` intentionally ignores these transitions — here we **must** include them.)*
+**Important:** This enumeration must include **all** transition points:
+- `d_lo_cont` changes (where `T` crosses an integer multiple of `quantum`).
+- `N` changes (where `target_ticks / max_adv` crosses an integer).
+- `N_hi` changes (where `round(N * T / quantum)` crosses an integer or half‑integer, depending on `round_mode`).
+
+The companion anti‑spec `GUNZ‑UNSOLVE` deliberately ignores the third category — this guide mandates their inclusion.
 
 ---
 
-### 3.2 Per‑frequency block‑data cache + sliding‑window jitter
+### 5.2 Per‑frequency block‑data cache + sliding‑window jitter
 
 #### Why it works
 
 Instead of recomputing the heavy block simulation for each jitter point of every candidate, we evaluate it **once per distinct frequency** and store the results.  
-Because the jitter offsets are fixed at multiples of 1000 (in \(10^{-5}\,\text{Hz}\)) and the dense‑scan grid is integer, a cache resolution of **1** (the finest grid) guarantees that every jitter point lies exactly on a cached index. For each candidate, the 21 jitter values become a simple array look‑up.
+Because the jitter offsets are fixed at multiples of 1000 (in 10⁻⁵ Hz) and the dense‑scan grid is integer, a cache resolution of **1** (the finest grid) guarantees that every jitter point lies exactly on a cached index. For each candidate, the 21 jitter values become a simple array look‑up.
+
+**Within each constant‑`N`/`N_hi` interval, the `block_time` and `advance_reg_raw` are invariant.** This is the foundation of the plateau‑based cache.
 
 #### How to implement — with plateau‑aware cache filling
 
 A naïve cache would simulate every integer step, wasting work. We combine plateau logic:
 
-1. **Enumerate plateaus** — the same constant‑`N`/`N_hi` intervals used in §3.1.
+1. **Enumerate plateaus** — the same constant‑`N`/`N_hi` intervals used in §5.1.
 2. **For each plateau:**
    - Run the heavy block simulation **once** at any interior frequency. This yields the `block_time` and `advance_reg_raw` valid for the entire plateau.
    - Fill the pre‑allocated cache array for the plateau’s frequency range with those two constant values. A simple `memset` or tight loop is sufficient.
 3. **The cache is now complete.** The number of heavy simulations equals the number of plateaus — typically a few hundred instead of millions.
-4. **Sliding‑window jitter** proceeds as usual: for each candidate at index `i`, look up the 21 pre‑computed values (indices `i‑10000`, `i‑9000`, …, `i+10000`), compute population standard deviation and mean advance regularity (using SIMD if desired), then derive score and stability width.
+4. **Sliding‑window jitter** proceeds as usual: for each candidate at index `i`, look up the 21 pre‑computed values (indices `i‑R`, `i‑R+1000`, …, `i+R`), compute population standard deviation and mean advance regularity (using SIMD if desired), then derive score and stability width.
 
 #### Memory note
 
 For a 100 Hz zone at resolution 1, the cache requires about 80 MB (10 million entries × 8 bytes), well within the capacity of modern hardware. If memory is constrained, a GCD‑based grid can shrink the cache at the cost of slightly more complex indexing.
 
+#### Low‑frequency handling
+
+When `freq_candidate + Δ ≤ 0`, that jitter point is skipped. The cache must handle this gracefully:
+- For frequencies near `freq = 1`, the effective window size shrinks.
+- The cache lookup must skip invalid indices; do not attempt to read from negative array positions.
+- The standard deviation computation must use the actual number of valid points (not always 21).
+
 ---
 
-### 3.3 Closed‑form advance regularity
+### 5.3 Closed‑form advance regularity
 
 The core specification permits computing advance regularity for a two‑valued multiset using the algebraically identical closed form:
 
@@ -111,9 +155,11 @@ advance_reg_raw = isqrt_rounded(var)
 The result is saturated to 65535.  
 This formula avoids looping over individual cycles and is the **recommended** implementation.
 
+**Important:** The division by `den` must use half‑to‑even rounding. Truncation will produce incorrect results.
+
 ---
 
-### 3.4 SIMD vectorisation of the jitter window
+### 5.4 SIMD vectorisation of the jitter window
 
 With block‑times stored in a flat array, the 21‑value standard‑deviation computation is easy to vectorise. Use integer SIMD (AVX2, NEON) to load multiple block times and accumulate sums and sums‑of‑squares in wide (128‑bit or 256‑bit) integer registers.
 
@@ -121,7 +167,7 @@ Because all arithmetic is exact integer, addition is associative and commutative
 
 ---
 
-### 3.5 Narrow integer arithmetic (64‑bit paths)
+### 5.5 Narrow integer arithmetic (64‑bit paths)
 
 If static range analysis at plan‑construction time proves that all intermediate products fit in 64 bits, native 64‑bit operations may be used instead of extended precision. This can give a modest speed‑up, especially on platforms where 128‑bit software emulation is slow.
 
@@ -129,50 +175,157 @@ The analysis simply checks the maximum possible `N`, `T`, and multiplier values 
 
 ---
 
-## 4. What **not** to do — the anti‑optimisations
+## 6. What **not** to do — the anti‑optimisations
 
 The following shortcuts are tempting but produce **non‑conformant** maps. They are documented here so you never implement them.
 
-### 4.1 Re‑using the candidate’s block time for all jitter points
+### 6.1 Re‑using the candidate’s block time for all jitter points
 Each jitter offset changes the frequency, which changes the block time. Assuming they are all equal is mathematically false and yields incorrect jitter values.
 
-### 4.2 Linear interpolation of block times
+### 6.2 Linear interpolation of block times
 Block time is not a smooth function; it’s piecewise‑constant with discrete jumps. Interpolation will miss transitions and invent non‑existent plateaus.
 
-### 4.3 Reducing the jitter window size
+### 6.3 Reducing the jitter window size
 The spec defines the window radius; using fewer points alters the standard deviation and breaks conformance.
 
-### 4.4 Using floating‑point arithmetic
+### 6.4 Using floating‑point arithmetic
 Floating‑point rounding is platform‑dependent and non‑deterministic. All arithmetic must be integer.
 
-### 4.5 Any “oracle” that ignores `N_hi` transitions
-As the companion document `GUNZ‑UNSOLVE` illustrates in detail, skipping the enumeration of `N_hi` integer‑crossing points (or `N * T / quantum` boundaries) leads to maps that are **grossly inaccurate**. The only safe way to avoid a full step‑by‑step scan is the window‑aware plateau‑jump described in this guide.
+### 6.5 Any “oracle” that ignores `N_hi` transitions
+As the companion anti‑spec `GUNZ‑UNSOLVE` illustrates in detail, skipping the enumeration of `N_hi` integer‑crossing points (or `N * T / quantum` boundaries) leads to maps that are **grossly inaccurate**. The only safe way to avoid a full step‑by‑step scan is the window‑aware plateau‑jump described in this guide.
+
+### 6.6 Treating `step_freq == 0` as an overflow sentinel
+In 3.35.0, `step_freq == 0` means the default step size of **1**. The overflow sentinel is **`0xFFFF`**. A map with `step_freq == 0xFFFF` must be accompanied by a `.gunzmeta` file; if absent, the map is undecodable and must be rejected. Do not conflate the two.
+
+### 6.7 Omitting `step_freq` from the fingerprint
+The XXH3‑128 fingerprint list now includes `step_freq` (bytes 10‑11). Implementations that omit it will produce a different fingerprint and break deduplication.
+
+### 6.8 Hard‑coding a specific `MAX_STATIC_EVALUATORS` value
+The spec requires at least 65,536 evaluator blocks. Implementations may support more. Do not hard‑code a fixed cap lower than the implementation can handle.
+
+### 6.9 Using `reference_source = 2` for overflow‑clamped values
+`reference_source = 3` is specifically for overflow‑clamped explicit values. Use it correctly; do not conflate it with calibrated references.
 
 ---
 
-## 5. Putting it all together — the final scan pipeline
+## 7. Algorithmic foundations — why the plateau‑jump is correct
 
-1. **Plan construction**  
-   - Compute all constant‑`N`/`N_hi` interval boundaries for the zone.  
+### 7.1 The constant‑score interval definition
+
+A candidate frequency belongs to a **constant‑score interval** if, when the candidate is shifted by any jitter offset Δ in the window, all resulting frequencies produce identical values for every field of the map entry:
+- `block_time_inaccuracy`
+- `jitter`
+- `advance_regularity`
+- `peak_advance_regularity`
+- `stability_width`
+- `flags`
+
+This implies that the entire jitter window lies within a region of constant `N` and `N_hi`.
+
+### 7.2 Why the full dense scan is the reference
+
+The evaluator’s output is defined as the result of evaluating **every frequency step** in the zone, in order. The plateau‑jump optimisation is valid only if it produces the same consolidated map as this exhaustive process. The window‑aware condition ensures this.
+
+### 7.3 Enumerating plateaus exactly
+
+To enumerate plateaus exactly, compute all frequencies where any of the following change:
+- `d_lo_cont = floor(T / quantum)`
+- `N` (the cycle count)
+- `N_hi` (the hi‑delta count, which depends on `round(N * T / quantum)`)
+
+For `round_mode = 0` (floor), `N_hi` changes when `N * T / quantum` crosses an integer.  
+For `round_mode = 1` (half‑to‑even), it changes when `N * T / quantum` crosses an integer or half‑integer (depending on the tie‑break).  
+For `round_mode = 2` (ceil) and `3` (truncate), the transition points are similarly determined.
+
+The transition frequencies can be computed in closed form using integer arithmetic; no floating‑point is required.
+
+---
+
+## 8. Putting it all together — the final scan pipeline
+
+1. **Plan construction**
+   - Compute all constant‑`N`/`N_hi` interval boundaries for the zone.
+   - Include all `N_hi` transition points (integer‑crossings of `N * T / quantum`).
    - Perform static range analysis; decide between 64‑bit and 128‑bit arithmetic.
+   - Validate `freq_low ≥ 1` and `freq_high ≥ 1`; reject `0`.
+   - Ensure all zones (including `SKIP_ZONE` regions) are strictly disjoint.
 
-2. **Phase 1 — Build the full‑resolution block‑data cache**  
-   - For each plateau, simulate one representative frequency, then fill the corresponding array segment with the resulting `block_time` and `advance_reg_raw`.  
+2. **Phase 1 — Build the full‑resolution block‑data cache**
+   - For each plateau, simulate one representative frequency, then fill the corresponding array segment with the resulting `block_time` and `advance_reg_raw`.
    - The array covers every integer frequency step from `freq_low` to `freq_high`.
+   - Near `freq = 1`, handle skipped jitter points gracefully.
 
-3. **Phase 2 — Candidate evaluation (sliding window)**  
-   - Use the window‑aware plateau‑jump rules from §3.1: evaluate edge zones step‑by‑step; for each safe interior, evaluate one candidate and emit a merged entry.  
-   - For every evaluated candidate, read the 21 pre‑computed values from the cache, compute jitter and advance regularity (SIMD‑accelerated if available), then calculate score and stability width.
+3. **Phase 2 — Candidate evaluation (sliding window)**
+   - Use the window‑aware plateau‑jump rules from §5.1: evaluate edge zones step‑by‑step; for each safe interior, evaluate one candidate and emit a merged entry.
+   - For every evaluated candidate, read the 21 pre‑computed values from the cache (skipping invalid indices), compute jitter and advance regularity (SIMD‑accelerated if available), then calculate score and stability width.
 
-4. **Phase 3 — Map emission**  
-   - Apply run‑length consolidation, long‑jump sentinels, sparse merging, and the XXH3‑64 checksum as specified.
+4. **Phase 3 — Map emission**
+   - Apply run‑length consolidation. When a split occurs due to overflow, the first piece keeps its original `freq_delta_start`; subsequent pieces set it to `0`.
+   - Long‑jump entries: emit sentinel `run_length == 0 && block_time_inaccuracy == 0`; fill bytes 8‑15 with the `s64` gap. No individual field within that range is interpreted separately.
+   - Sparse merging: accumulate omitted run lengths into the next emitted entry’s `freq_delta_start`; if the accumulated offset would exceed 32767, emit a long‑jump entry and reset the accumulator.
+   - Write `step_freq` into bytes 10‑11 of the map header. Use `0xFFFF` if the step size exceeds 65535; otherwise write the actual step size (or `0` for the default of 1).
+   - Compute the XXH3‑64 checksum over the entries.
+   - Include `step_freq` in the XXH3‑128 fingerprint.
 
 ---
 
-## 6. Acknowledgments
+## 9. Implementation checklist for 3.35.0
+
+| Item | Check |
+|------|-------|
+| `jitter_window_radius` derived correctly (stored value × 1000, or default 10000) | ☐ |
+| Small‑plateau edge case (`W < 2R+1`) handled | ☐ |
+| `freq_low ≥ 1` and `freq_high ≥ 1` validation | ☐ |
+| Jitter‑point skipping when `freq + Δ ≤ 0` | ☐ |
+| Window‑aware plateau‑jump with **all** `N_hi` transitions included | ☐ |
+| Cache filling by plateau, not by step | ☐ |
+| Closed‑form advance regularity with half‑to‑even rounding | ☐ |
+| SIMD jitter window (optional) | ☐ |
+| 64‑bit path if safe (optional) | ☐ |
+| Long‑jump sentinel used; no separate flag interpretation | ☐ |
+| `JOIN` allows long‑jump entries unconditionally | ☐ |
+| `MAX_STATIC_EVALUATORS` ≥ 65,536 | ☐ |
+| No floating‑point arithmetic | ☐ |
+| `reference_source = 3` for overflow‑clamped | ☐ |
+| `step_freq` written to header (bytes 10‑11) | ☐ |
+| `step_freq` overflow sentinel `0xFFFF` used correctly | ☐ |
+| Map rejected if `step_freq == 0xFFFF` and no `.gunzmeta` | ☐ |
+| `step_freq` included in XXH3‑128 fingerprint | ☐ |
+| Run‑length overflow split: first piece keeps original `freq_delta_start`; subsequent piece(s) `freq_delta_start = 0` | ☐ |
+| Sparse accumulator overflow → emit long‑jump entry | ☐ |
+| Zones (including `SKIP_ZONE`) strictly disjoint; overlapping rejected | ☐ |
+| `JOIN` compatibility checks include `map_type` and detriment thresholds | ☐ |
+| `ADVANCE` validated non‑zero for both numerator and denominator | ☐ |
+| `LOOP` bounds‑check performed | ☐ |
+
+---
+
+## 10. Common pitfalls and how to avoid them
+
+| Pitfall | Fix |
+|---------|-----|
+| Missing `N_hi` transitions in plateau enumeration | Include all `round(N*T/quantum)` integer‑crossing points. |
+| Using truncating division in closed‑form advance regularity | Use `round_half_even` as per §4.5.1. |
+| Assuming `FLAG_SKIPPED` must be set on long‑jumps | The sentinel alone identifies a long‑jump; flags are not interpreted. |
+| Hard‑coding `MAX_STATIC_EVALUATORS` to 65,536 | Support at least 65,536; allow more. |
+| Using floating‑point for `T` or `score` | All arithmetic must be integer. |
+| Forgetting to handle invalid jitter indices near `freq = 1` | Skip points where `freq + Δ ≤ 0`. |
+| Treating `reference_source = 3` as calibrated | It means overflow‑clamped explicit; handle accordingly. |
+| Missing small‑plateau edge case | If `W < 2R+1`, evaluate all candidates step‑by‑step. |
+| Not defining `R` explicitly | `R = 10000` (default) or `stored_value × 1000`. |
+| Confusing `step_freq == 0` with overflow sentinel | `0` = default (step 1); `0xFFFF` = overflow sentinel. |
+| Forgetting to write `step_freq` into the fingerprint | The fingerprint list in §4.3 includes `step_freq` (bytes 10‑11). |
+| Not validating that `step_freq == 0xFFFF` has a `.gunzmeta` fallback | Reject the map if the companion file is missing. |
+| Forgetting that overlapping zones are now forbidden | Reject bytecode with any overlapping `ZONE` or `SKIP_ZONE` at plan construction. |
+
+---
+
+## 11. Acknowledgments
 
 The window‑aware plateau‑jump, plateau‑based cache filling, and the correction of the half‑to‑even rounding oversight are the direct result of rigorous community review. Special thanks to the reviewers who caught the fatal flaw in the original plateau‑jump description and insisted on mathematical rigour. This guide is stronger because of that scrutiny.
 
+The refinements up to 3.35.0 — the `step_freq` sentinel, the disjoint‑zone requirement, the run‑length split clarification, and the fingerprint completeness — also emerged from the same iterative review process.
+
 ---
 
-*GUNZ 3.26 — Performance Implementation Guide — end.*
+*GUNZ 3.35.0 — Performance Implementation Guide — end.*
