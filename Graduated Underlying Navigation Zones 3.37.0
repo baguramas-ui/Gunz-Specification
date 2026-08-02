@@ -57,7 +57,7 @@ The Dancing Hammer, the joy in the rhythm of refinement.
 
 ## 1. Overview
 
-GUNZ 3.37.0 is a deterministic, offline‑scanner runtime for discrete‑clock systems. It produces compressed resonance maps — **stability topographies** — that describe optimal operating frequencies for any process governed by a fixed‑quantum clock. The format targets AI‑driven feedback loops, heterogeneous hardware deployment, and long‑term archival.
+GUNZ 3.37.0 is a deterministic, offline tool that takes a set of discrete‑clock parameters and produces a map of the most stable operating frequencies for any process that advances in fixed time steps. It produces compressed resonance maps — **stability topographies** — that describe optimal operating frequencies for any process governed by a fixed‑quantum clock. The format targets AI‑driven feedback loops, heterogeneous hardware deployment, and long‑term archival.
 
 The specification is split into four independent layers:
 
