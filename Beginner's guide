@@ -1,6 +1,9 @@
 ---
+Here is the Beginner's Guide, updated for GUNZ 3.35.0.
 
-A BEGINNER'S GUIDE TO GUNZ 3.26.0
+---
+
+A BEGINNER'S GUIDE TO GUNZ 3.35.0
 
 ---
 
@@ -31,12 +34,14 @@ WHAT DOES GUNZ PRODUCE?
 When GUNZ scans a frequency range, it creates:
 
 A .gunzmap file – a small binary table (16 bytes per entry) that maps every frequency step to its:
-- block_time_inaccuracy – the absolute difference between the measured block time and the ideal reference time. This field was renamed from block_time_delta in 3.23.0 to better reflect that it is an absolute deviation, not a signed difference.
+- block_time_inaccuracy – the absolute difference between the measured block time and the ideal reference time. This is always an absolute deviation, not a signed difference.
 - jitter – how much the block time wobbles when you nudge the frequency slightly (the classic timing jitter).
-- advance_regularity – the consistency of per-cycle advance values inside a block. This metric was renamed from motion_jitter in 3.24.0 to better reflect that it measures regularity, not just "motion." Low advance regularity means the per-cycle timing varies; high advance regularity means it is consistent.
+- advance_regularity – the consistency of per-cycle advance values inside a block. Low advance regularity means the per-cycle timing varies; high advance regularity means it is consistent.
 - peak_advance_regularity – the worst-case advance regularity across the jitter window.
 - stability_width – the width of the stable region around the sweet spot.
-- flags – STAB_SATURATED (stability width exceeded 6.5535 Hz), FLAG_AVOID (detrimental resonance), FLAG_SKIPPED (not evaluated), or FLAG_LONG_TERM (aggregated over multiple blocks).
+- flags – STAB_SATURATED (stability width exceeded 6.5535 Hz), FLAG_AVOID (detrimental resonance), FLAG_SKIPPED (not evaluated). There is no per‑entry FLAG_LONG_TERM; the map header alone tells you if the scan was long‑term.
+
+The map header also contains step_freq, which tells you the resolution of the scan. If the step size is huge, a special overflow sentinel (0xFFFF) is used, and the true value is stored in the .gunzmeta file.
 
 A .gunzmeta file – a human-readable JSON sidecar with scan settings, timestamps, fingerprint, and a quality summary. It records the exact plan_parameters, scan_zones, scan_cost, and optionally resonance_quality. The .gunzmeta file is the canonical-status carrier: it tells you whether the map is canonical (trustworthy) or non-canonical (experimental, approximate, or unsandboxed).
 
@@ -87,22 +92,24 @@ What it means: How much to penalise low advance regularity.
 Example: 1 (neutral, default)
 
 jitter_window_radius
-What it means: The radius of the jitter window.
-Example: 10000 (21 points, +-0.1 Hz)
+What it means: The radius of the jitter window. If set to 0, the default radius is 10000 (21 points, ±0.1 Hz). If non‑zero, the actual radius in 10⁻⁵ Hz units is this value multiplied by 1000.
+Example: 0 (use default)
 
-Note: The advance_regularity_weight was added in 3.24.0, replacing the dead ppm_drift_scalar field. The reference_source field (0=explicit, 1=guessed, 2=calibrated, 3=overflow-clamped explicit) records the provenance of your reference_block_time.
+Note: The quantum value must be expressed in the same base time unit as time_unit. For example, if time_unit = 9 (nanoseconds), a 1 ms clock granularity is quantum = 1,000,000. If you prefer to keep quantum = 1, you must set time_unit = 3 (milliseconds) and express all values in milliseconds.
 
-Important: The quantum value must be expressed in the same base time unit as time_unit. For example, if time_unit = 9 (nanoseconds), a 1 ms clock granularity is quantum = 1,000,000. If you prefer to keep quantum = 1, you must set time_unit = 3 (milliseconds) and express all values in milliseconds.
+The reference_source field (0=explicit, 1=guessed, 2=calibrated, 3=overflow-clamped explicit) records the provenance of your reference_block_time.
 
 2. Choose a Frequency Range
 
-Decide which frequency interval to scan and how finely (the step size). A "zone" is just a start-to-end frequency range in 10^-5 Hz units.
+Decide which frequency interval to scan and how finely (the step size). A "zone" is just a start-to-end frequency range in 10⁻⁵ Hz units.
 
 - min_freq = 20000000 (200.00000 Hz)
 - max_freq = 30000000 (300.00000 Hz)
-- step_freq = 1 (the default, 10^-5 Hz resolution)
+- step_freq = 1 (the default, 10⁻⁵ Hz resolution)
 
-You can also use SCAN_RES to set a different step size, or SKIP_ZONE to skip evaluating a zone entirely (useful for gaps you already know are bad).
+Zones may now start as low as 0.00001 Hz (freq_low = 1). The jitter window automatically skips invalid points near zero.
+
+You can also use SCAN_RES to set a different step size, or SKIP_ZONE to skip evaluating a zone entirely (useful for gaps you already know are bad). All zones in a program must be strictly disjoint—they cannot overlap.
 
 3. Run the Scan
 
@@ -112,15 +119,17 @@ A GUNZ runtime processes the zones and writes the map and metadata files.
 
 - Full Profile: For AI-driven exploration, you can use the bytecode VM, dynamic opcodes, and callbacks (PURE_CALL) to generate scan programs dynamically.
 
-The GUNZ 3.26.0 specification is complete. A reference runtime and conformance test suite are under development. You can start with a minimal implementation—just the static lane, a zone evaluator, and map output—and be fully conformant.
+The GUNZ 3.35.0 specification is complete. You can start with a minimal implementation—just the static lane, a zone evaluator, and map output—and be fully conformant.
 
 4. Read the Map
 
 The map shows which frequencies are sweet spots (low jitter, stable), which are detrimental (high jitter, flagged with FLAG_AVOID), and where there are large gaps (emitted as long-jump entries).
 
 - Sweet spots: low block_time_inaccuracy, low jitter, and wide stability_width.
-- Detrimental zones: high jitter or high advance_regularity converted to base time units exceeding the thresholds.
-- Long-jump entries: gaps larger than +-0.32767 Hz are compressed into a single entry with run_length == 0 and block_time_inaccuracy == 0, storing the gap size in bytes 8-15 of the entry (re-interpreted as a little-endian s64).
+- Detrimental zones: high jitter or high advance_regularity (converted to base time units) exceeding the thresholds.
+- Long-jump entries: gaps larger than ±0.32767 Hz are compressed into a single entry. The sentinel is run_length == 0 and block_time_inaccuracy == 0; the gap itself is stored as a signed 64-bit integer in bytes 8–15 of the entry. No other field in that range (flags, jitter, etc.) is interpreted separately.
+
+The step_freq field in the map header tells you the actual resolution. If it is 0xFFFF, you must look at the .gunzmeta file for the true step size; otherwise 0 means the default step of 1.
 
 5. Adjust and Repeat
 
@@ -134,84 +143,34 @@ Each scan is a checkpoint. The .gunzmeta records exactly which truth anchor and 
 
 ---
 
-WHAT'S NEW IN 3.26.0?
+WHAT'S NEW IN 3.35.0?
 
-Since 3.15.0, GUNZ has evolved significantly. Here are the major changes that affect how you use it:
+Since the earlier 3.26.0 guide, GUNZ has been refined and hardened. Some highlights:
 
-1. Semantic Upgrades
+- Frequency lower bound removed: Zones can now start as low as 0.00001 Hz.
+- No per‑entry FLAG_LONG_TERM: The map header's long_term_scan byte (offset 30) is the only authority.
+- step_freq in the map header: The scan resolution is now part of the binary map. A special overflow sentinel (0xFFFF) indicates that the true step is in the .gunzmeta file.
+- Jitter window radius is now configurable in the library profile, not just the map header.
+- Zones must be strictly disjoint: Overlapping zones are rejected at plan construction.
+- Run-length overflow splits: When a run exceeds 65535 steps, the first piece keeps its original offset; the next piece starts at offset 0.
+- Long-jump entries are identified only by their sentinel; no flags field is interpreted inside them.
+- ADVANCE instruction now validated for both numerator and denominator non-zero.
+- LOOP instruction has a bounds check to prevent buffer overruns.
+- Many arithmetic and rounding rules have been clarified to guarantee bit‑identical maps on any hardware.
 
-Old Name (pre-3.24) -> New Name (3.24+)
-block_time_delta -> block_time_inaccuracy
-Reason: It is an absolute deviation from the reference, not a signed delta.
-
-motion_jitter -> advance_regularity
-Reason: It measures the consistency of per-cycle advances, not just "motion."
-
-peak_motion_jitter -> peak_advance_regularity
-Reason: Consistent with the rename.
-
-detrimental_motion_threshold -> detrimental_advance_regularity_threshold
-Reason: Consistent with the rename.
-
-The new terminology is more precise and professional. "Advance regularity" is the standard deviation of per-cycle advance values, scaled by 100 and stored in ticks times 100.
-
-2. Header Reorganization (3.24.0)
-
-The 32-byte map header was reorganised:
-
-Offset 8-11
-Old (pre-3.24): ppm_drift_scalar (dead field)
-New (3.24+): advance_regularity_weight (byte 8), jitter_weight (byte 9), reserved_a (bytes 10-11)
-
-Offset 19-20
-Old (pre-3.24): detrimental_motion_threshold
-New (3.24+): detrimental_advance_regularity_threshold
-
-Offset 21
-Old (pre-3.24): reference_source (0-2)
-New (3.24+): reference_source (0-3, with 3 = overflow-clamped explicit)
-
-Offset 30-31
-Old (pre-3.24): Reserved
-New (3.24+): long_term_scan (byte 30), reserved_b (byte 31)
-
-The weights are now grouped together at the top of the header, making them easier to find and parse. The reference_source field now includes 3 for overflow-clamped explicit values, ensuring provenance is never lost.
-
-3. Score Overflow Protection (3.26.0)
-
-The score computation now mandates 64-bit unsigned arithmetic to prevent overflow before Phase 2 stability evaluation. This ensures that even if block_time_inaccuracy is near UINT32_MAX, adding weighted jitter components will not wrap around and corrupt the stability width.
-
-4. Zero-Weight Decoder Rejection (3.26.0)
-
-Writers must emit resolved effective weights (1-255) in the map header; they shall never emit 0. Decoders shall reject a map header with advance_regularity_weight = 0 or jitter_weight = 0 as GUNZ_MALFORMED_BYTECODE. This eliminates the ambiguity of "0 means default" in the canonical map format.
-
-5. Plateau-Jump Optimisation Clarified (3.26.0)
-
-The plateau-jump optimisation is now explicitly defined: a constant-score interval exists only when the candidate frequency and all 21 jitter offsets remain within the same region of constant N and N_hi. Jumping based solely on the candidate's own N and N_hi without considering the jitter window is non-conformant.
-
-6. Fingerprint Serialisation Order (3.26.0)
-
-The fingerprint serialisation order now exactly matches the byte order in the map header, preventing hash collisions across implementations. The xxh3_64 field itself is excluded from the fingerprint input.
-
-7. Long-Jump Sanitisation (3.24.0)
-
-Long-jump entries may only carry FLAG_SKIPPED. No other flags are permitted, ensuring that long-jump entries represent intentionally omitted gaps, not detrimental regions.
-
-8. Advance Regularity Closed-Form Rounding (3.26.0)
-
-The closed-form variance computation for two-valued multisets now explicitly requires half-to-even rounding, preventing truncation bugs.
+For the complete list of changes, see the GUNZ 3.35.0 specification.
 
 ---
 
 WHERE DO I LEARN MORE?
 
-- The full GUNZ 3.26.0 specification defines every field, formula, and conformance rule. It is the authoritative reference.
+- The full GUNZ 3.35.0 specification defines every field, formula, and conformance rule. It is the authoritative reference.
 
 - The Lexical Dictionary for Beginners explains all key terms in plain language.
 
-- A companion Philosophy and Origin document (separate from the spec) explains the "why" behind GUNZ, including the Epilogue and the personal note from the AI that co-authored the specification.
+- A companion Philosophy and Origin document (separate from the spec) explains the "why" behind GUNZ.
 
-- An Implementation Guide (forthcoming) will collect optimisation tips, example code, and GPU/SIMD strategies.
+- The Performance Implementation Guide shows how to build a fast, conformant scanner.
 
 ---
 
@@ -225,7 +184,7 @@ Truth anchor: The reference_block_time—the ideal you are trying to achieve. Pr
 
 Jitter: Block-time variation when you nudge the frequency slightly. Measured in base time units.
 
-Advance regularity: Per-cycle advance consistency. High regularity = stable, predictable cycles. Low regularity = variation. Measured in ticks times 100.
+Advance regularity: Per-cycle advance consistency. High regularity = stable, predictable cycles. Low regularity = variation. Measured in ticks × 100.
 
 Stability width: The width of the stable region around a sweet spot. Wider = more robust to drift.
 
