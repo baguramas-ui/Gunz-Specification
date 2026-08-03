@@ -22,7 +22,7 @@ The Dancing Hammer, the joy in the rhythm of refinement.
 
 ---
 
-# GUNZ 3.48.0 — Graduated Underlying Navigation Zones  
+# GUNZ 3.49.0 — Graduated Underlying Navigation Zones  
 **ISA · Runtime · Library**
 
 ---
@@ -46,19 +46,16 @@ The Dancing Hammer, the joy in the rhythm of refinement.
 
 ## Version History
 
-**Changes from 3.47.0 to 3.48.0:**
+**Changes from 3.48.0 to 3.49.0:**
 
-- **Static‑lane handling of `LOOP` and `PURE_CALL` defined:** The plan‑construction parser now expands `LOOP` by repetition and captures `PURE_CALL` callbacks for attachment to the next `ZONE`, mirroring dynamic‑lane semantics.  This closes the last remaining gap for Full‑profile static‑lane programs.
-- **Empty map after `EXPORT` with no zones clarified:** A valid map consisting of only a header and checksum is written; no error occurs.
-- **`chain_window_duration` metadata field clarified:** The field is explicitly independent of the per‑scan `window_duration` used by the evaluator.
-- **`JOIN` merge rule for placeholders simplified:** The phrase “compatible widths” has been removed; two `FLAG_SKIPPED` entries are always merged into a single skipped entry covering the sub‑interval.
-- **Version bump:** Bytecode version `0x00030030`, map version `0x002D`, metadata string `"3.48.0"`.
+- **Circular `jitter_window_radius` evaluator input fixed:** The effective radius is now resolved at plan‑construction time from the library profile (or default), removing an impossible dependency on the not‑yet‑written map header. The map‑header field description has been updated accordingly.
+- **Version bump:** Bytecode version `0x00030031`, map version `0x002E`, metadata string `"3.49.0"`.
 
 ---
 
 ## 1. Overview
 
-GUNZ 3.48.0 is a deterministic, offline tool that takes a set of discrete‑clock parameters and produces a map of the most stable operating frequencies for any process that advances in fixed time steps. It produces compressed resonance maps — **stability topographies** — that describe optimal operating frequencies for any process governed by a fixed‑quantum clock. The format targets AI‑driven feedback loops, heterogeneous hardware deployment, and long‑term archival.
+GUNZ 3.49.0 is a deterministic, offline tool that takes a set of discrete‑clock parameters and produces a map of the most stable operating frequencies for any process that advances in fixed time steps. It produces compressed resonance maps — **stability topographies** — that describe optimal operating frequencies for any process governed by a fixed‑quantum clock. The format targets AI‑driven feedback loops, heterogeneous hardware deployment, and long‑term archival.
 
 The specification is split into four independent layers:
 
@@ -87,7 +84,7 @@ The bytecode VM is an **orchestration and security boundary**, not an execution 
 
 A conformant GUNZ implementation that targets the Minimal Profile **SHALL** implement the following:
 
-- **Bytecode header parsing** (§2.2) – Accept only the static lane opcode set. Accept only the exact bytecode version `0x00030030` (major 3, minor 48). Reject any other version with `GUNZ_MALFORMED_BYTECODE`. Validate `magic`, `time_unit ≤ 12`, and `target_ticks ≥ 1`.
+- **Bytecode header parsing** (§2.2) – Accept only the static lane opcode set. Accept only the exact bytecode version `0x00030031` (major 3, minor 49). Reject any other version with `GUNZ_MALFORMED_BYTECODE`. Validate `magic`, `time_unit ≤ 12`, and `target_ticks ≥ 1`.
 
 - **Static opcode subset** – Implement `HALT`, `ZONE`, `SKIP_ZONE`, `SCAN_RES`, and `EXPORT`. All other opcodes (including `LOOP`, `IMPORT`, `JOIN`, `STREAM`, `PURE_CALL`) **SHALL** be rejected with `GUNZ_MALFORMED_BYTECODE`.
 
@@ -149,7 +146,7 @@ The bytecode ISA enables AI agents to programmatically orchestrate complex multi
 - The bytecode is **tightly packed**; no padding bytes exist between fields.
 - Operands immediately follow their opcode without alignment padding.
 - The header is exactly 32 bytes for all version 3.x revisions. Future major versions may define a different header size; implementations **SHALL** reject unknown major versions.
-- **Version handling:** The bytecode version stored in the header is `0x00030030` (major 3, minor 48) for all 3.48.x revisions of this specification. An implementation **MUST accept only this exact version**. Any other version **SHALL** be rejected with `GUNZ_MALFORMED_BYTECODE`.
+- **Version handling:** The bytecode version stored in the header is `0x00030031` (major 3, minor 49) for all 3.49.x revisions of this specification. An implementation **MUST accept only this exact version**. Any other version **SHALL** be rejected with `GUNZ_MALFORMED_BYTECODE`.
 - Decoding is host‑endianness‑independent by construction: the bytecode is always little‑endian, and a correct decoder converts fields to host byte order. A mismatch of the `magic` field after correct little‑endian decoding **SHALL** be rejected.
 - **Unaligned accesses (normative):** The bytecode stream is intentionally tightly packed; decoders **MUST** perform unaligned multi‑byte reads using portable methods that resolve to the correct little‑endian value on any host CPU. Failure to handle unaligned accesses correctly is non‑conforming. The following C snippet illustrates a safe 32‑bit little‑endian read that is independent of host endianness:
 
@@ -171,7 +168,7 @@ The evaluator's hot path operates on native‑aligned structures constructed at 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0 | u32 | `magic` | `0x47554E5A` |
-| 4 | u32 | `version` | `0x00030030` (major 3, minor 48). Implementations must accept only this exact version. |
+| 4 | u32 | `version` | `0x00030031` (major 3, minor 49). Implementations must accept only this exact version. |
 | 8 | u32 | `quantum` | Clock granularity in the base time unit (0 = use library quantum) |
 | 12 | u32 | `target_ticks` | Ticks to reach (e.g., 1140). Must be ≥ 1; `target_ticks = 0` shall be rejected with `GUNZ_MALFORMED_BYTECODE`. |
 | 16 | u32 | `mult_num` | Advance multiplier numerator |
@@ -604,11 +601,7 @@ The resonance evaluator computes the metrics (`block_time_inaccuracy`, `jitter`,
 - If `long_term_scan` is active, a **measurement window duration** `window_duration` (a `u64` in the **same base time unit as the header**) is supplied at plan construction and embedded in the evaluator block. The normative maximum `window_duration` is **≤ 2³² − 1 base‑time units**; any request exceeding this value shall cause plan construction to fail with `GUNZ_INVALID_LIBRARY`. This limit applies to the integer value of `window_duration` **in the base time unit**; it is not a fixed real‑time ceiling. For `time_unit = 12` (picoseconds) the maximum observable window is ~4.3 ms; for `time_unit = 0` (seconds) it is ~136 years. Users must choose a `time_unit` that matches their measurement domain. The `window_duration` value as a `u64` integer must not exceed `2³²−1`; no additional scaling is applied.
 - `jitter_weight` – the merged effective weight from the library profile (always in the range **1‑255**; default **4**). The library profile may use the value 0 as a shorthand for "use default 4," but that shorthand is resolved to the actual default value at plan‑construction time; the evaluator itself only ever sees a resolved weight in 1‑255.
 - `advance_regularity_weight` – the merged effective weight from the library profile (always in the range **1‑255**; default **1**). The library profile may use the value 0 as a shorthand for "use default 1," but that shorthand is resolved to the actual default value at plan‑construction time; the evaluator itself only ever sees a resolved weight in 1‑255.
-- `jitter_window_radius` – the radius, in 10⁻⁵ Hz units, for the jitter‑point window.  The effective radius is determined by the first non‑zero value among the following sources, tested in order:  
-  1. The map header’s `jitter_window_radius` field (byte 18).  
-  2. The library profile’s `jitter_window_radius` field.  
-  3. The default value **10000** (21 points, ±0.1 Hz).  
-  If the chosen source is non‑zero, the effective radius is `stored_value × 1000`; otherwise the default 10000 is used.  The stored value (when non‑zero) must be in the range **1–255**, and the resulting radius is always a multiple of 1000.
+- `jitter_window_radius` – the effective radius, in 10⁻⁵ Hz units, for the jitter‑point window. This value is resolved at plan construction time per §3.10: if the library profile specifies a non‑zero `jitter_window_radius`, the effective radius is `stored_value × 1000`; otherwise the default **10000** (21 points, ±0.1 Hz) is used. The resolved radius is always a multiple of 1000.
 
 **Algorithm:**
 
@@ -780,8 +773,8 @@ When `sparse_map` is set, intervals omitted because all quantitative metrics are
 | 13    | u8   | `detrimental_jitter_threshold` | Threshold for jitter in detrimental mode. |
 | 14    | u8   | `time_unit`                  | Decimal exponent (must match bytecode header). |
 | 15    | u8   | `stability_mapping_flag`     | Always 1 in v3.x. |
-| 16‑17 | u16  | `map_version`                | `0x002D` for v3.48.x maps. |
-| 18    | u8   | `jitter_window_radius`       | Scale factor. If `0`, the default radius **10000** (21 points, ±0.1 Hz) is used. If non‑zero, the actual radius in 10⁻⁵ Hz units is `stored_value × 1000`. The stored value must be in the range **1‑255**, and the resulting radius is guaranteed to be a multiple of 1000. |
+| 16‑17 | u16  | `map_version`                | `0x002E` for v3.49.x maps. |
+| 18    | u8   | `jitter_window_radius`       | Scale factor written by the scanner. `0` means the default radius **10000** was used (either because no library profile was provided or the library specified `0`). A non‑zero value `v` means the effective radius was `v × 1000` (10⁻⁵ Hz units). The stored value is always in the range **0–255**, and when non‑zero the resulting radius is a multiple of 1000. |
 | 19‑20 | u16  | `detrimental_advance_regularity_threshold` | Threshold for advance regularity (base time units). |
 | 21    | u8   | `reference_source`           | 0 = explicit, 1 = guessed, 2 = calibrated. Values > 2 shall cause decoders to reject the map with `GUNZ_MALFORMED_BYTECODE`. Writers shall enforce `reference_source ≤ 2`; otherwise map construction fails with `GUNZ_INVALID_LIBRARY`. |
 
@@ -920,7 +913,7 @@ Every time a resonance map is successfully produced, a full implementation **sha
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `gunz_version` | string | `"3.48.0"` |
+| `gunz_version` | string | `"3.49.0"` |
 | `map_fingerprint` | string | XXH3‑128 fingerprint (32 hex digits, lowercase) |
 | `creation_timestamp` | string | ISO 8601 UTC with millisecond precision |
 | `session_id` | string or null | A unique identifier for the exploration session. If `callback_sandboxed` is `true` (Full profile), `session_id` **MUST** be a non‑null UUIDv4 string (RFC 4122); otherwise (Minimal profile) it may be `null` or any string. |
@@ -1029,7 +1022,7 @@ If signature verification fails, the map shall be considered non‑canonical and
 
 ## 5. GUNZ‑NET (Future)
 
-GUNZ‑NET is a planned companion specification for automated map exchange, deduplication, and network‑scale coordination. It is not part of the GUNZ 3.48.0 core standard. In the meantime, `.gunzmap` files carry their own integrity proofs and can be shared directly.
+GUNZ‑NET is a planned companion specification for automated map exchange, deduplication, and network‑scale coordination. It is not part of the GUNZ 3.49.0 core standard. In the meantime, `.gunzmap` files carry their own integrity proofs and can be shared directly.
 
 **Versioning policy:** Any future `GUNZ‑NET` revision shall preserve backward compatibility of the existing fields; new fields will be added only in a reserved extension space.
 
@@ -1063,7 +1056,7 @@ A compliant implementation **SHALL**:
 - Emit long‑jump entries for large gaps, clamped scan regions, wide SKIP_ZONE intervals, and inter‑zone gaps as specified.
 - Merge sparse intervals by adding their `run_length` to the next entry's `freq_delta_start`, with sequential accumulation for consecutive omitted intervals as described in §4.2.
 - Group consecutive candidates into a single entry only when all metrics (including `stability_width`) and flags are identical.
-- Set `map_version = 0x002D` in the map header.
+- Set `map_version = 0x002E` in the map header.
 - Set `jitter_window_radius` (the u8) appropriately, defaulting to 0 for standard scans.
 - Set `reference_source` to the correct provenance (0, 1, or 2); reject maps with `reference_source > 2` on decode; writers shall enforce `reference_source ≤ 2`.
 - Set `jitter_weight` and `advance_regularity_weight` (both 1‑255) in the header. **Writers shall never emit 0 in these fields.**
@@ -1093,7 +1086,7 @@ A compliant implementation **SHALL**:
 - Reject bytecode where any `ZONE` has `freq_high < freq_low`, or any frequency equal to `0`.
 - If the `sandboxed_callbacks_required` flag is set, execute all `PURE_CALL` in a sandbox conforming to §3.7 and reject the program if sandboxing is unavailable. If the flag is set, the runtime **must** produce an attestation signature; failure to do so shall result in rejection with `GUNZ_INVALID_LIBRARY`.
 - Ignore bit 10 (`sparse_map`) when evaluating the `lane_requirements` mask; treat it as an independent flag.
-- **Strict Version Matching:** Implementations SHALL reject any bytecode or map file where the version field does not exactly match the runtime's pinned version (e.g., `0x00030030` for 3.48.0). Return `GUNZ_MALFORMED_BYTECODE`.
+- **Strict Version Matching:** Implementations SHALL reject any bytecode or map file where the version field does not exactly match the runtime's pinned version (e.g., `0x00030031` for 3.49.0). Return `GUNZ_MALFORMED_BYTECODE`.
 
 **Runtime:**
 - Generate `.gunzmeta` (with `session_id`, `callback_sandboxed`, `sandbox_type`, `attestation_signature`, and `runtime_id` as specified) and optional statistics files, unless operating under the Minimal Profile (§1.2).
@@ -1236,7 +1229,7 @@ This specification defines the architectural contract. Future revisions will pre
 
 ---
 
-## Appendix B — Example: Decoding a GUNZ 3.48.0 Resonance Map
+## Appendix B — Example: Decoding a GUNZ 3.49.0 Resonance Map
 
 This example walks through the decoding of a synthetic map containing all major entry types. All multi‑byte integers are little‑endian; frequencies are in 10⁻⁵ Hz units unless converted for display. The `.gunzmap` file contains only the map header and entries; there is no bytecode header.
 
@@ -1247,7 +1240,7 @@ This example walks through the decoding of a synthetic map containing all major 
 ```
 -- Map header (32 bytes) --
 C0 EA 21 01  05 2E C8 0E  01 04 01 00  00 00 09 01
-2D 00 00 00  00 00 00 00  02 00 00 00  01 00 00 00
+2E 00 00 00  00 00 00 00  02 00 00 00  01 00 00 00
 
 -- Entry 1 (normal) --
 D9 01 64 00  98 B1 01 00  00 00 62 00  62 00 00 00
@@ -1287,7 +1280,7 @@ C8 00 96 00  50 C3 00 00  05 00 0A 00  0C 00 14 00
 | 13 | `detrimental_jitter_threshold` | `00` | 0 | default (255) |
 | 14 | `time_unit` | `09` | 9 | nanoseconds |
 | 15 | `stability_mapping_flag` | `01` | 1 | must be 1 |
-| 16‑17 | `map_version` | `2D 00` | 0x002D | 3.48.x |
+| 16‑17 | `map_version` | `2E 00` | 0x002E | 3.49.x |
 | 18 | `jitter_window_radius` | `00` | 0 | default (10000, 21 points) |
 | 19‑20 | `detrimental_advance_regularity_threshold` | `00 00` | 0 | default (65535) |
 | 21 | `reference_source` | `02` | 2 | calibrated |
@@ -1349,7 +1342,7 @@ The individual fields at offsets 8–15 are not interpreted separately; they f
 
 ## Appendix C — Rationale for Constants *(Informative)*
 
-The following table provides the engineering rationale for selected normative constants used in **GUNZ 3.48.0**:
+The following table provides the engineering rationale for selected normative constants used in **GUNZ 3.49.0**:
 
 | Constant | Value | Justification |
 |----------|-------|---------------|
@@ -1394,4 +1387,4 @@ For a worked example of decoding a full map with all entry types, see Appendix�
 
 ---
 
-*GUNZ 3.48.0 — Graduated Underlying Navigation Zones — specification complete.*
+*GUNZ 3.49.0 — Graduated Underlying Navigation Zones — specification complete.*
