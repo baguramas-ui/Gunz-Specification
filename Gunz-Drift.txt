@@ -1,0 +1,217 @@
+These are thoughtful refinements. Let me address each:
+
+1. **Aggregation arithmetic:** Added explicit 64‑bit signed requirement for the long‑term mode accumulator.
+2. **Version coordination:** Added a sentence clarifying that map version `0x0041` is reserved exclusively for DRIFT and may not be used by other extensions.
+3. **Edge case clarity:** Added an explicit note that `quantum ≥ 1` is inherited from the core spec, and drift is only well‑defined for positive quantum.
+
+Here is the final, corrected **GUNZ‑DRIFT** specification.
+
+---
+
+# GUNZ‑DRIFT — Intra‑Block Advance Trend Metric Extension  
+*Draft 0.6 — Companion to GUNZ 3.60.0*
+
+---
+
+## 1. Overview
+
+GUNZ‑DRIFT extends the GUNZ resonance evaluator with a directional **drift** metric that captures the *intra‑block* accumulation of rounding decisions.  Unlike `advance_regularity`, which measures the variance of per‑cycle advances without regard to order, drift measures the **slope** of those advances across the cycles of a single block.
+
+A positive drift means the per‑cycle advance increases over the course of a block (long cycles cluster toward the end).  A negative drift means the advance decreases (long cycles cluster toward the beginning).  A drift of zero indicates that the long and short cycles are uniformly distributed throughout the block.
+
+This metric reveals a dimension of timing behaviour that the existing metrics are blind to — the direction in which rounding decisions accumulate within a block, independent of their magnitude.  It requires no new simulation infrastructure and is computed from data the evaluator already collects.
+
+---
+
+## 2. Definition
+
+Let a block consist of `N` cycles.  Each cycle `i` (0‑based) contributes an advance value `a_i` of either `100 × adv_lo` or `100 × adv_hi` (ticks × 100), determined by the placement logic defined in §2.1.
+
+The **intra‑block drift** `d` is the slope of the linear least‑squares fit of `a_i` against the cycle index `i`.
+
+\[
+d = \frac{N \cdot \sum (i \cdot a_i) - (\sum i) \cdot (\sum a_i)}{N \cdot \sum (i^2) - (\sum i)^2}
+\]
+
+where all sums run from `i = 0` to `N-1`.
+
+Because the cycle indices form a known arithmetic progression, the sums of `i` and `i^2` have closed forms:
+
+\[
+S_i = \frac{N(N-1)}{2}, \qquad S_{i^2} = \frac{N(N-1)(2N-1)}{6}
+\]
+
+The normative computation is:
+
+```
+sum_a   = Σ a_i          (256‑bit unsigned)
+sum_ia  = Σ (i · a_i)    (256‑bit unsigned)
+num     = N · sum_ia − S_i · sum_a    (signed, may be negative)
+den     = N · S_{i^2} − (S_i)²        (positive for N ≥ 2)
+```
+
+The absolute quotient `q = |num| / den` is computed using the half‑to‑even integer division defined in §4.5.1 of the core GUNZ specification (which applies to non‑negative operands).  The rounded drift value is:
+
+```
+d =  q  if num ≥ 0
+d = −q  if num < 0
+```
+
+Equivalently, for negative numerators the tie‑breaking rule is: if the exact quotient lies exactly halfway between two integers, round to the even integer.  Examples: `−1.5 → −2`, `−0.5 → 0`, `−2.5 → −2`.
+
+All multiplications shall use **256‑bit unsigned arithmetic** to prevent overflow.  The denominator is guaranteed to be positive for `N ≥ 2`.  For `N < 2`, drift is defined as **zero**.
+
+The drift value `d` is a signed integer expressed in **ticks × 100 per cycle**.  It is **not** converted to base time units for storage; the conversion to base time units, if needed for scoring, follows the same pattern as for `advance_regularity` (§3.11 step 4 of the core specification).
+
+### 2.1 Per‑Cycle Advance Sequence (Normative)
+
+The evaluator determines `N_hi` — the number of long cycles in the block — by rounding `N * T / quantum` according to the selected `round_mode`.  This value is computed in §3.11 step 3 of the core specification and is **not** recomputed by the drift algorithm.  The drift metric must assign the long advances to exactly `N_hi` cycles in a pattern that is consistent with the evaluator's own computation but also sensitive to the continuous frequency.
+
+The placement is performed by a deterministic Bresenham‑style error‑accumulation algorithm.  The algorithm guarantees exactly `N_hi` long cycles by construction, so the total block time and `advance_regularity` are unchanged.  The ordering of those long cycles depends on the continuous cycle time `T` through a phase offset derived from the fractional part of `N * T / quantum`, giving drift its discriminative power.
+
+**Initialisation:**
+
+Let `F = N * T` (computed in 128‑bit unsigned, in base time units).  
+Let `R_exact = F % quantum` (remainder, `0 ≤ R_exact < quantum`).
+
+The phase offset `E` is derived from the fractional timing:
+
+```
+E = (R_exact * N) / quantum    (integer division, floor)
+```
+
+Since `R_exact < quantum`, the product `R_exact * N` is at most `(quantum - 1) * N`, and the result `E` is guaranteed to be in the range `[0, N-1]`.  This satisfies the invariant `0 ≤ E < N`, which is the necessary and sufficient condition for the Bresenham loop to produce exactly `N_hi` long cycles.
+
+**Bresenham placement loop** (for `i = 0` to `N-1`):
+
+```
+error = E
+for i = 0 to N-1:
+    error = error + N_hi
+    if (error >= N):
+        a_i = 100 × adv_hi
+        error = error - N
+    else:
+        a_i = 100 × adv_lo
+```
+
+The resulting sequence `a_0, …, a_{N-1}` contains exactly `N_hi` long cycles (value `100 × adv_hi`) and `N − N_hi` short cycles (value `100 × adv_lo`).  The ordering is deterministic and varies with the fractional timing of the block.
+
+**Properties:**
+
+- When `R_exact = 0`, the block time is an exact multiple of the quantum.  The initial error is `E = 0`, and the resulting pattern is the most uniform distribution of long cycles.  Drift will be zero (or very close to zero).
+- As `R_exact` increases toward `quantum`, the initial error approaches `N-1`, producing a front‑loaded or back‑loaded pattern.  The drift formula will detect this as a non‑zero slope.
+
+All intermediate computations shall use **128‑bit unsigned arithmetic** where required to avoid overflow.  The resulting sequence is bit‑identical for all conformant implementations given identical inputs.
+
+The drift metric is only well‑defined when `quantum ≥ 1`.  This condition is inherited from the core GUNZ specification, which requires `quantum ≥ 1` for all valid bytecode programs.
+
+---
+
+## 3. Interpretation
+
+| Drift value | Meaning |
+|-------------|---------|
+| `d = 0` | Uniform distribution of long cycles.  No directional bias. |
+| `d > 0` | Long cycles cluster toward the **end** of the block (advance increases). |
+| `d < 0` | Long cycles cluster toward the **beginning** of the block (advance decreases). |
+
+The magnitude of `d` is the average change in advance value per cycle, in ticks × 100.
+
+Drift is independent of `advance_regularity`.  Two blocks with identical per‑cycle advance variance can have opposite drift if the long cycles are ordered differently.  Drift provides the directional information that variance discards.
+
+---
+
+## 4. Aggregation in Long‑Term Mode
+
+When `long_term_scan` is active, the evaluator simulates multiple consecutive blocks for each candidate.  For each block `j`, let `d_j` be the intra‑block drift computed as above.
+
+The per‑block drift values `d_j` shall be accumulated in a **64‑bit signed** accumulator.  This is sufficient because `|d_j| ≤ 192` under the normative bounds `MAX_N = 2³¹−1` and `quantum ≤ 2³²−1`.
+
+- **Drift (stored):** The arithmetic mean of all `d_j` across the measurement window, rounded half‑to‑even.  The rounding of the mean follows the same signed half‑to‑even convention defined in §2.
+- **Peak drift:** The maximum absolute value of `d_j` across the window, stored with its original sign.
+
+The peak drift is useful for identifying intermittent directional behaviour that may average to zero but cause transient effects.
+
+---
+
+## 5. Storage
+
+### 5.1 Map Entry Extension
+
+When drift computation is requested, the standard 16‑byte map entry is extended by **4 bytes**:
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 16 | s16 | `drift` | Intra‑block drift (ticks × 100 per cycle).  Zero if `N < 2` or drift is not computed. |
+| 18 | s16 | `peak_drift` | Peak absolute drift observed across blocks (ticks × 100 per cycle), with original sign. |
+
+The extended entry size is 20 bytes.  The `xxh3_64` checksum covers the extended entries.
+
+Maps using this extension shall set the map version to `0x0041`.  This map version is **reserved exclusively** for the GUNZ‑DRIFT extension.  Other extensions shall not use version `0x0041`.  Decoders that do not support the drift extension shall reject maps with version `0x0041` with `GUNZ_MALFORMED_BYTECODE`.
+
+### 5.2 Metadata
+
+The `.gunzmeta` file shall include the following additional fields when drift is computed:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `drift_enabled` | boolean | `true` if the drift metric was computed. |
+| `drift_weight` | integer | (Optional) Weight applied to the drift term in a custom scoring formula, if any. |
+
+The drift values themselves reside in the map entries and the optional raw statistics file.
+
+---
+
+## 6. Relationship to Other Metrics
+
+- **`advance_regularity`** measures the variance of per‑cycle advance values.  Drift measures the *slope*.  Together they provide a complete description of the distribution and ordering of long cycles within a block.
+- **`jitter`** measures block‑time variation across the jitter window.  Drift is an intra‑block metric and is orthogonal to jitter.
+- **`stability_width`** describes the width of the score valley.  Drift does not affect the score unless explicitly weighted into a custom scoring formula.
+
+---
+
+## 7. Integration with the Snowball Metaphor
+
+The snowball rolls within a single block.  The sequence of per‑cycle advances is a trajectory, and the slope of that trajectory is the intra‑block drift.  A block whose long cycles cluster at the end is a snowball that accelerates as it rolls.  A block whose long cycles cluster at the beginning is a snowball that decelerates.  The drift metric captures this internal movement, making the snowball visible at the scale where it currently exists — inside the block.
+
+---
+
+## 8. Conformance
+
+A conformant GUNZ‑DRIFT implementation must:
+
+- Compute drift using the exact least‑squares formula defined in §2, with 256‑bit intermediates for `sum_a`, `sum_ia`, `num`, and `den`.
+- Use a 64‑bit signed accumulator for the long‑term mode sum (§4).
+- Apply half‑to‑even rounding to the final division, using the signed rounding convention specified in §2.
+- Produce the per‑cycle advance sequence using the placement algorithm of §2.1, with the initial error `E` derived from `R_exact` as specified.
+- Saturate the drift result to a signed 16‑bit integer before storage.
+- Produce bit‑identical drift values for identical inputs.
+- Set map version to `0x0041` when writing extended‑entry maps with drift.
+- Compute peak drift as the maximum absolute value across blocks in long‑term mode, preserving sign.
+
+Support for GUNZ‑DRIFT is **optional** for GUNZ 3.60.0 conformance.  Implementations that do not support the drift extension shall reject maps with version `0x0041` with `GUNZ_MALFORMED_BYTECODE`.
+
+---
+
+## 9. Examples
+
+### 9.1 Non‑Trivial Drift
+
+Consider two frequencies that produce identical `N = 10`, `N_hi = 3`, `d_lo_cont = 5`, `d_hi_cont = 6` (in ticks, before scaling).  Their `jitter` and `advance_regularity` are identical.  However, because `T` differs by a fraction of a quantum, `R_exact` differs, producing different initial errors:
+
+- **Case A:** `R_exact` is small.  `E` is small.  The Bresenham algorithm places long cycles at indices 2, 5, 8.  
+  Drift ≈ +17.3 (positive — long cycles weighted toward the second half).
+
+- **Case B:** `R_exact` is large.  `E` is close to `N-1`.  The Bresenham algorithm places long cycles at indices 0, 3, 6.  
+  Drift ≈ −17.3 (negative — long cycles weighted toward the first half).
+
+Both cases have `advance_regularity ≈ 458.26` (ticks × 100).  Drift distinguishes them, capturing the directional ordering that variance ignores.
+
+### 9.2 Zero Drift
+
+When `R_exact = 0`, the block time is an exact multiple of the quantum.  The initial error is `E = 0`, the Bresenham algorithm produces a perfectly alternating pattern, and drift is zero.  The block has no directional bias.
+
+---
+
+*GUNZ‑DRIFT — Intra‑Block Advance Trend Metric Extension — draft 0.6*
