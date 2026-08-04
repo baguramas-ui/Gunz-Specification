@@ -59,7 +59,7 @@ The Dancing Hammer, the joy in the rhythm of refinement.
 - **Dynamic‑lane `SCAN_RES` static check clarified:** The check is a loader‑time check, not a runtime VM check.
 - **`JOIN` flag handling rules consolidated:** Flag merging rules are now described in a single paragraph for clarity.
 - **Version bump:** Bytecode version `0x0003003C`, map version `0x0039`, metadata string `"3.60.0"`.
-- **Fixed regression on step‑size term to zone‑disjointness condition
+- **Fixed:** regression on step‑size term to zone‑disjointness condition
 
 ---
 
