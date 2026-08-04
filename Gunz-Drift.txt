@@ -1,4 +1,3 @@
-
 # GUNZ‑DRIFT — Intra‑Block Advance Trend Metric Extension  
 *Draft 0.6 — Companion to GUNZ 3.60.0*
 
@@ -11,6 +10,42 @@ GUNZ‑DRIFT extends the GUNZ resonance evaluator with a directional **drift** m
 A positive drift means the per‑cycle advance increases over the course of a block (long cycles cluster toward the end).  A negative drift means the advance decreases (long cycles cluster toward the beginning).  A drift of zero indicates that the long and short cycles are uniformly distributed throughout the block.
 
 This metric reveals a dimension of timing behaviour that the existing metrics are blind to — the direction in which rounding decisions accumulate within a block, independent of their magnitude.  It requires no new simulation infrastructure and is computed from data the evaluator already collects.
+
+---
+
+**Section — Integration with GUNZ 3.60.0**
+
+GUNZ‑DRIFT is an optional extension to GUNZ 3.60.0.  Implementers must already have a conformant GUNZ 3.60.0 evaluator.  The following hooks describe the minimal changes needed.
+
+**Evaluator hook (§3.11 Phase 1, after step 3 “Discrete simulation of a single block”):**
+
+After the block simulation computes `N`, `N_hi`, `d_lo_cont`, `d_hi_cont`, and `T`, the drift computation is inserted as follows (before the next jitter point is processed):
+
+1. If `N < 2`, set `drift_block = 0` and `peak_drift_candidate = 0` and skip the remaining steps.
+2. Compute the per‑cycle advance sequence using the algorithm of GUNZ‑DRIFT §2.1, with `adv_lo = 100 × d_lo_cont` and `adv_hi = 100 × d_hi_cont`.
+3. Compute `sum_a` and `sum_ia` from the sequence `a_0, …, a_{N-1}`.
+4. Compute the closed‑form sums `S_i = N(N-1)/2` and `S_{i^2} = N(N-1)(2N-1)/6`.
+5. Compute `drift_block = round_half_even(num / den)` using the formula in GUNZ‑DRIFT §2.
+6. If in long‑term mode, repeat for each block and compute the arithmetic mean (`drift`) and the signed maximum absolute value (`peak_drift`) across the measurement window.  In single‑block mode, `drift = drift_block` and `peak_drift = drift_block`.
+
+The drift values are stored in the map entry extension described in GUNZ‑DRIFT §5.1.  The map version must be set to `0x0041`.
+
+**Map‑output hook (§4.2, §4.2.1, §6):**
+
+- The map header `map_version` field shall be `0x0041` when drift is computed.
+- The `xxh3_64` checksum covers the extended 20‑byte entries.
+- The fingerprint computation remains unchanged (it uses the header, not the entries).
+
+**Metadata hook (§4.6):**
+
+- Add the optional boolean field `drift_enabled = true`.
+- Optionally add `drift_weight` if drift is weighted in a custom scoring formula.
+
+**Decoder hook (§6):**
+
+- A conformant GUNZ 3.60.0 decoder that does not support GUNZ‑DRIFT shall reject any map with `map_version = 0x0041` with `GUNZ_MALFORMED_BYTECODE`.
+
+No other sections of GUNZ 3.60.0 are affected.
 
 ---
 
