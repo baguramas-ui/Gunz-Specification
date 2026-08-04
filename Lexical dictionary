@@ -1,5 +1,5 @@
 
-# GUNZ 3.35.0 — Lexical Dictionary for Beginners
+# GUNZ 3.60.0 — Lexical Dictionary for Beginners
 
 *These definitions assume no engineering background. They are not normative—they are here purely to help you read the spec and guides without getting lost in jargon.*
 
@@ -75,7 +75,7 @@ The starting frequency of a scan, in 10⁻⁵ Hz units. All other frequency po
 *See also:* Zone, `freq_delta_start`.
 
 **`freq_delta_start`**  
-The offset (in 10⁻⁵ Hz) from the `base_freq` to the start of a map entry. When sparse maps are used, this field may accumulate the run lengths of previously omitted intervals. In 3.35.0, if the accumulated offset would overflow the signed 16‑bit field, a long‑jump entry is emitted instead.  
+The offset (in 10⁻⁵ Hz) from the `base_freq` to the start of a map entry. When sparse maps are used, this field may accumulate the run lengths of previously omitted intervals. In 3.60.0, if the accumulated offset would overflow the signed 16‑bit field, a long‑jump entry is emitted instead.  
 *See also:* Map Entry, Sparse Map.
 
 **Long‑jump Entry**  
@@ -94,7 +94,7 @@ The fundamental unit of a GUNZ resonance map. Each entry describes a consecutive
 *See also:* Run‑length, Long‑jump Entry.
 
 **Map Version (`map_version`)**  
-A number identifying which revision of the map format is being used. GUNZ 3.35.0 maps use `0x0020`. Decoders **must reject** maps with an unknown version—this prevents accidental misinterpretation of future formats.  
+A number identifying which revision of the map format is being used. GUNZ 3.60.0 maps use `0x0039`. Decoders **must reject** maps with an unknown version—this prevents accidental misinterpretation of future formats.  
 *See also:* Conformance.
 
 **Run‑length**  
@@ -114,14 +114,13 @@ The size (in 0.0001 Hz units) of the stable region around a sweet spot. A wide
 *See also:* Stable Region, Flags.
 
 **`step_freq`**  
-The dense‑scan step size, in 10⁻⁵ Hz units. It is stored directly in the map header (bytes 10‑11).  
+The dense‑scan step size, in 10⁻⁵ Hz units, stored in the map header (bytes 10‑11).  
 - `0` → default step size of **1** (10⁻⁵ Hz).  
-- `1‑65535` → actual step size.  
-- `0xFFFF` → overflow sentinel; the true step size exceeds 65535 and **must** be obtained from the companion `.gunzmeta` file. If the `.gunzmeta` file is unavailable, the map is undecodable and **shall** be rejected.  
-*See also:* Dense Scan, `SCAN_RES`.
+- `1‑65535` → exact step size (when the `step_freq_overflow` flag is 0).  
+- When the `step_freq_overflow` flag (byte 31) is **1**, the u16 field is written as `0` and ignored; a 4‑byte little‑endian `u32` extension immediately after the header gives the full 32‑bit step size.  No companion file is needed for decoding.
 
 **Zone**  
-A specific, continuous range of frequencies you want to scan (e.g., from 30.00000 Hz to 60.00000 Hz). The bytecode `ZONE` instruction defines these boundaries. GUNZ evaluates every frequency step inside the zone. Zones may start as low as `freq_low = 1` (0.00001 Hz); the jitter window automatically skips any invalid points. **All zones in a program—including `SKIP_ZONE` regions—must be strictly disjoint; overlapping zones are rejected.**  
+A specific, continuous range of frequencies you want to scan (e.g., from 30.00000 Hz to 60.00000 Hz). The bytecode `ZONE` instruction defines these boundaries. GUNZ evaluates every frequency step inside the zone. Zones may start as low as `freq_low = 1` (0.00001 Hz); the jitter window automatically skips any invalid points. **All zones in a program—including `SKIP_ZONE` regions—must be strictly disjoint: when sorted by `freq_low`, each zone must satisfy `freq_low_next ≥ freq_high_prev + step_freq`.**  
 *See also:* Base Frequency, `step_freq`.
 
 ---
@@ -228,7 +227,7 @@ The total measurement window (in base time units) for long‑term scans. The eva
 ## Bytecode & Orchestration
 
 **Bytecode / ISA / Opcode**  
-The low‑level instruction language that GUNZ uses to describe a scan. The **ISA** (Instruction Set Architecture) is the complete set of instructions. An **opcode** is the part of an instruction that specifies which operation to perform. You don’t need to write bytecode yourself; an AI, a library, or a tool can generate it. If you’re using the Minimal Profile, you can ignore these entirely. In 3.35.0, the bytecode version is fixed to `0x00030023`; exact version matching is required.  
+The low‑level instruction language that GUNZ uses to describe a scan. The **ISA** (Instruction Set Architecture) is the complete set of instructions. An **opcode** is the part of an instruction that specifies which operation to perform. You don’t need to write bytecode yourself; an AI, a library, or a tool can generate it. If you’re using the Minimal Profile, you can ignore these entirely. In 3.60.0, the bytecode version is fixed to `0x0003003C`; exact version matching is required.  
 *See also:* Minimal Profile, Lane.
 
 **Fuel**  
@@ -264,16 +263,12 @@ A modern, high‑speed elliptic‑curve digital signature algorithm. Signatures 
 *See also:* Attestation, Fingerprint.
 
 **Fingerprint (XXH3‑128, XXH3‑64)**  
-A unique, short digital fingerprint of a map or file. Like a human fingerprint, it identifies the exact content. GUNZ uses XXH3‑64 for quick integrity checks and XXH3‑128 for global deduplication and map identity. XXH3 is extremely fast and produces identical results on all platforms. The fingerprint is computed over the header fields in their exact byte order, including `step_freq` (bytes 10‑11).  
+A unique, short digital fingerprint of a map or file. Like a human fingerprint, it identifies the exact content. GUNZ uses XXH3‑64 for quick integrity checks and XXH3‑128 for global deduplication and map identity. XXH3 is extremely fast and produces identical results on all platforms. The fingerprint is computed over the header fields in their exact byte order, including `step_freq` (bytes 10‑11) and the 4‑byte extension when `step_freq_overflow` is set.  
 *See also:* Deduplicate, Attestation.
 
 **Flags**  
-Bit‑sized on/off switches in the header or map entries that control features (e.g., `FLAG_AVOID`, `FLAG_SKIPPED`, `sparse_map`). They let the same file format carry different types of information without changing the structure. In 3.35.0, reserved flag bits (3‑7) must be zero; decoders reject maps with non‑zero reserved bits.  
+Bit‑sized on/off switches in the header or map entries that control features (e.g., `FLAG_AVOID`, `FLAG_SKIPPED`, `sparse_map`). They let the same file format carry different types of information without changing the structure. In 3.60.0, reserved flag bits (3‑7) must be zero; decoders reject maps with non‑zero reserved bits.  
 *See also:* Map Entry, Long‑jump Entry.
-
-**Long‑jump Entry**  
-A special marker in the map that says “skip a very large gap here.” Used for gaps larger than ±0.32767 Hz. Identified solely by the sentinel `run_length == 0` and `block_time_inaccuracy == 0`. The gap size is stored in bytes 8‑15 as a little‑endian `s64`; no individual field within that range is interpreted separately.  
-*See also:* Map Entry, Sentinel, `SKIP_ZONE`.
 
 **Sandboxing**  
 An optional security layer that executes callback functions inside a restricted environment (e.g., WebAssembly, Firecracker, gVisor). Required for production multi‑tenant use; not needed for single‑user tools. When `sandboxed_callbacks_required` is set, attestation is mandatory.  
@@ -324,7 +319,7 @@ The ability to treat a completed scan as a save point. Using `session_id` and fi
 *See also:* Hibernation, Metadata.
 
 **Plateau‑jump Optimisation**  
-An implementation technique that skips large regions where the entire jitter window remains within a constant‑`N`/`N_hi` interval. Allowed as long as the final map is bit‑identical to a full scan. It does not interfere with stability width computation.  
+An implementation technique that skips large regions where the entire jitter window remains within a constant‑score interval (all Phase‑1 metrics invariant). Allowed as long as the final map is bit‑identical to a full scan. It does not interfere with stability width computation.  
 *See also:* Stability Width.
 
 **`reference_source`**  
@@ -332,7 +327,7 @@ A field in the map header (0‑3) that records how the `reference_block_time` wa
 - `0` = explicitly supplied by the user or AI
 - `1` = computed by the guessing rule (Rule GUNZ_REF_GUESS)
 - `2` = calibrated from a previous map (Calibrated Reference)
-- `3` = overflow‑clamped explicit (the value exceeded `UINT32_MAX` and was clamped)  
+- `3` = not applicable (no scanning was performed; `reference_block_time` defaulted to 0)  
 Decoders reject values > 3.  
 *See also:* Reference Block Time, Guessing Rule, Calibrated Reference.
 
@@ -349,11 +344,11 @@ The combined metric that GUNZ uses to rank frequency candidates:
 ```
 score = |total_time - reference_block_time| + jitter_weight * jitter + advance_regularity_weight * advance_regularity_btu
 ```
-A lower score is better. The weights allow users to prioritise different aspects of system behaviour. The score computation uses 64‑bit unsigned arithmetic to prevent overflow.  
+A lower score is better. The weights allow users to prioritise different aspects of system behaviour. The score computation uses 128‑bit unsigned arithmetic and is saturated to `UINT64_MAX`.  
 *See also:* Jitter Weight, Advance Regularity Weight, Resonance.
 
 **Truth Anchor**  
-The reference point that defines what “correct” means for a scan. In a timing scan, it’s the `reference_block_time`. In a semantic scan (Dam), it’s the Canonical Keyphrase LUT. The Geas demands that we always measure truth relative to a stable, external anchor.  
+The reference point that defines what “correct” means for a scan. In a timing scan, it’s the `reference_block_time`. The Geas demands that we always measure truth relative to a stable, external anchor.  
 *See also:* Reference Block Time, Resonance.
 
 ---
@@ -407,4 +402,4 @@ A family of very fast, non‑cryptographic hash functions. GUNZ uses XXH3‑64 f
 
 ---
 
-*If a term is missing, check the full GUNZ 3.35.0 specification or the companion philosophy document. This lexicon is a living helper, not a normative standard.*
+*If a term is missing, check the full GUNZ 3.60.0 specification or the companion philosophy document. This lexicon is a living helper, not a normative standard.*
