@@ -1,193 +1,127 @@
-
-A BEGINNER'S GUIDE TO GUNZ 3.35.0
-
----
-
-WHAT IS GUNZ?
-
-GUNZ (Graduated Underlying Navigation Zones) is a deterministic tool for finding the best operating frequencies of any system that advances in fixed clock steps. Think of a game engine ticking 4,800 times per second, a hardware timer, a motor controller, a network packet scheduler, or any process where time is measured in whole numbers of a base unit (nanoseconds, microseconds, milliseconds, etc.). GUNZ scans a range of frequencies, simulates exactly how many ticks are needed to reach a target, and produces a compact resonance map that tells you where the timing is stable, where it jitters, and which frequencies to avoid.
-
-The name "Graduated" reflects the evolution of the project: what began as a tool for a single broken game engine has matured into a general-purpose, interdisciplinary standard for discrete-clock system analysis. The "zones" are the frequency intervals you explore; the "navigation" is the AI-driven or human-driven search for stable operating points; the "underlying" acknowledges that the physics of the clock is the foundation of everything.
+# A BEGINNER'S GUIDE TO GUNZ 3.60.0
 
 ---
 
-WHY USE GUNZ?
+## WHAT IS GUNZ?
 
-- It is deterministic. The same inputs always produce exactly the same map, on any machine, in any programming language, on any operating system. Share a scan with confidence—the map is the truth, not an approximation.
-
-- It works at any time scale. From seconds to picoseconds, just set the time_unit (0=seconds, 3=milliseconds, 6=microseconds, 9=nanoseconds, 12=picoseconds). The arithmetic scales cleanly because everything is expressed in the base time unit you choose.
-
-- It is built for automation. Deterministic output and companion metadata (the .gunzmeta file) let AI agents compare scans, adjust parameters, and resume work without human help. The session_id field lets you group related scans; the chain_next_fingerprint and chain_sequence fields let you build temporal chains of maps, creating a persistent memory of exploration.
-
-- It stores everything needed to reproduce a scan. Metadata captures the exact parameters, zones, scan cost, and even the provenance of the reference_block_time (explicit, guessed, calibrated, or overflow-clamped). You or an AI can re-run the same analysis years later and get bit-identical results.
-
-- It is a truth-seeking compass. Each scan is a checkpoint. If a new configuration makes things worse, you can reload the last good map (using the fingerprint chain) and try a different path. Over many iterations, each map becomes the anchor for the next.
+GUNZ (Graduated Underlying Navigation Zones) is a deterministic tool for finding the best operating frequencies of any system that advances in fixed clock steps.  Think of a game engine ticking 4 800 times per second, a hardware timer, a motor controller, a network packet scheduler, or any process where time is measured in whole numbers of a base unit (nanoseconds, microseconds, milliseconds, etc.).  GUNZ scans a range of frequencies, simulates exactly how many ticks are needed to reach a target, and produces a compact resonance map that tells you where the timing is stable, where it jitters, and which frequencies to avoid.
 
 ---
 
-WHAT DOES GUNZ PRODUCE?
+## WHY USE GUNZ?
 
-When GUNZ scans a frequency range, it creates:
-
-A .gunzmap file – a small binary table (16 bytes per entry) that maps every frequency step to its:
-- block_time_inaccuracy – the absolute difference between the measured block time and the ideal reference time. This is always an absolute deviation, not a signed difference.
-- jitter – how much the block time wobbles when you nudge the frequency slightly (the classic timing jitter).
-- advance_regularity – the consistency of per-cycle advance values inside a block. Low advance regularity means the per-cycle timing varies; high advance regularity means it is consistent.
-- peak_advance_regularity – the worst-case advance regularity across the jitter window.
-- stability_width – the width of the stable region around the sweet spot.
-- flags – STAB_SATURATED (stability width exceeded 6.5535 Hz), FLAG_AVOID (detrimental resonance), FLAG_SKIPPED (not evaluated). There is no per‑entry FLAG_LONG_TERM; the map header alone tells you if the scan was long‑term.
-
-The map header also contains step_freq, which tells you the resolution of the scan. If the step size is huge, a special overflow sentinel (0xFFFF) is used, and the true value is stored in the .gunzmeta file.
-
-A .gunzmeta file – a human-readable JSON sidecar with scan settings, timestamps, fingerprint, and a quality summary. It records the exact plan_parameters, scan_zones, scan_cost, and optionally resonance_quality. The .gunzmeta file is the canonical-status carrier: it tells you whether the map is canonical (trustworthy) or non-canonical (experimental, approximate, or unsandboxed).
-
-Optionally, a .gunzstats or .gunzstatz file – raw statistics for long-term measurements that can be chained across hours or days without losing precision. These are used when long_term_scan is enabled.
+- **Deterministic.**  The same inputs always produce exactly the same map, on any machine, in any language.
+- **Multi‑scale.**  From seconds to picoseconds — just set `time_unit`.
+- **Built for automation.**  AI‑friendly metadata, session chaining, and calibrated references let agents explore and refine autonomously.
+- **Self‑contained maps.**  Every `.gunzmap` file carries its own fingerprint and checksum; no external files are needed to decode it.
+- **Truth‑seeking compass.**  Each scan is a checkpoint.  If a new configuration makes things worse, reload the last good map and try a different path.
 
 ---
 
-HOW DO I USE GUNZ?
+## WHAT DOES GUNZ PRODUCE?
 
-1. Define Your System
+**A `.gunzmap` file** – a small binary table (16 bytes per entry) showing, for every frequency step:
 
-Choose the parameters that describe your discrete-clock system:
+- `block_time_inaccuracy` – how far the measured block time is from the ideal reference.
+- `jitter` – timing variation when the frequency is nudged slightly.
+- `advance_regularity` / `peak_advance_regularity` – consistency of per‑cycle advances.
+- `stability_width` – the width of the stable region around the sweet spot.
+- `flags` – saturation, avoidance, skipped, etc.
 
-quantum
-What it means: The smallest time step (in base time units).
-Example: 1,000,000 (1 ms, since the system timer has 1ms granularity, and we work in nanoseconds — time_unit = 9)
+The map header includes `step_freq` – the scan resolution.  If the resolution is very large (above 65535), a special overflow mechanism stores the true 32‑bit value right after the header, keeping the map self‑contained.  No companion file is needed for basic decoding.
 
-target_ticks
-What it means: The number of ticks you need to reach (the "finish line").
-Example: 1140 (the animation block length)
+**A `.gunzmeta` file** – a human‑readable JSON sidecar with scan settings, timestamps, fingerprint, and quality summary.  It records provenance (was the reference time explicit, guessed, calibrated, or not applicable?) and whether the map is canonical.
 
-mult_num / mult_den
-What it means: The advance multiplier (e.g., ticks per quantum).
-Example: mult_num=48, mult_den=10 (4.8 ticks per ms)
-
-round_mode
-What it means: How to round fractional ticks.
-Example: 1 (half-to-even, the default)
-
-hold_cycles / sep_cycles
-What it means: Extra cycles after the target.
-Example: 0 (none)
-
-time_unit
-What it means: The base time scale.
-Example: 9 (nanoseconds)
-
-reference_block_time
-What it means: The ideal block time you expect (the "truth anchor").
-Example: 248,000,000 (248 ms in nanoseconds)
-
-jitter_weight
-What it means: How much to penalise timing jitter.
-Example: 4 (default)
-
-advance_regularity_weight
-What it means: How much to penalise low advance regularity.
-Example: 1 (neutral, default)
-
-jitter_window_radius
-What it means: The radius of the jitter window. If set to 0, the default radius is 10000 (21 points, ±0.1 Hz). If non‑zero, the actual radius in 10⁻⁵ Hz units is this value multiplied by 1000.
-Example: 0 (use default)
-
-Note: The quantum value must be expressed in the same base time unit as time_unit. For example, if time_unit = 9 (nanoseconds), a 1 ms clock granularity is quantum = 1,000,000. If you prefer to keep quantum = 1, you must set time_unit = 3 (milliseconds) and express all values in milliseconds.
-
-The reference_source field (0=explicit, 1=guessed, 2=calibrated, 3=overflow-clamped explicit) records the provenance of your reference_block_time.
-
-2. Choose a Frequency Range
-
-Decide which frequency interval to scan and how finely (the step size). A "zone" is just a start-to-end frequency range in 10⁻⁵ Hz units.
-
-- min_freq = 20000000 (200.00000 Hz)
-- max_freq = 30000000 (300.00000 Hz)
-- step_freq = 1 (the default, 10⁻⁵ Hz resolution)
-
-Zones may now start as low as 0.00001 Hz (freq_low = 1). The jitter window automatically skips invalid points near zero.
-
-You can also use SCAN_RES to set a different step size, or SKIP_ZONE to skip evaluating a zone entirely (useful for gaps you already know are bad). All zones in a program must be strictly disjoint—they cannot overlap.
-
-3. Run the Scan
-
-A GUNZ runtime processes the zones and writes the map and metadata files.
-
-- Minimal Profile: You can build a tiny, fully conformant scanner that only handles static zones and spits out a valid .gunzmap. No bytecode VM, no callbacks, no sandboxing required. This is the recommended starting point for embedded systems or fixed-range sweeps.
-
-- Full Profile: For AI-driven exploration, you can use the bytecode VM, dynamic opcodes, and callbacks (PURE_CALL) to generate scan programs dynamically.
-
-The GUNZ 3.35.0 specification is complete. You can start with a minimal implementation—just the static lane, a zone evaluator, and map output—and be fully conformant.
-
-4. Read the Map
-
-The map shows which frequencies are sweet spots (low jitter, stable), which are detrimental (high jitter, flagged with FLAG_AVOID), and where there are large gaps (emitted as long-jump entries).
-
-- Sweet spots: low block_time_inaccuracy, low jitter, and wide stability_width.
-- Detrimental zones: high jitter or high advance_regularity (converted to base time units) exceeding the thresholds.
-- Long-jump entries: gaps larger than ±0.32767 Hz are compressed into a single entry. The sentinel is run_length == 0 and block_time_inaccuracy == 0; the gap itself is stored as a signed 64-bit integer in bytes 8–15 of the entry. No other field in that range (flags, jitter, etc.) is interpreted separately.
-
-The step_freq field in the map header tells you the actual resolution. If it is 0xFFFF, you must look at the .gunzmeta file for the true step size; otherwise 0 means the default step of 1.
-
-5. Adjust and Repeat
-
-Use time_unit to coarsen or refine the scan, tune the jitter window radius or jitter weight, and chain multiple maps with fingerprint links.
-
-- Coarse scans (large time_unit, e.g., 3 = milliseconds) are fast and reveal major edges.
-- Fine scans (small time_unit, e.g., 9 = nanoseconds) are more accurate but more expensive.
-- Adaptive multi-resolution scanning is a core design pattern: start coarse, deepen when silent, ascend when costly, verify upward, and re-probe if no edge appears.
-
-Each scan is a checkpoint. The .gunzmeta records exactly which truth anchor and scan parameters were used, and can optionally link to the previous checkpoint via a fingerprint chain (chain_next_fingerprint and chain_sequence). This lets you explore without fear—if a new configuration makes things worse, reload the last good checkpoint (using the fingerprint link) and try a different path. Over many iterations, each map becomes the anchor for the next, and GUNZ turns from a one-time scanner into a truth-seeking compass.
+**Optionally, `.gunzstats` / `.gunzstatz` files** – raw statistics for long‑term measurements that can be chained across hours or days.
 
 ---
 
-WHAT'S NEW IN 3.35.0?
+## HOW DO I USE GUNZ?
 
-Since the earlier 3.26.0 guide, GUNZ has been refined and hardened. Some highlights:
+### 1. Define Your System
 
-- Frequency lower bound removed: Zones can now start as low as 0.00001 Hz.
-- No per‑entry FLAG_LONG_TERM: The map header's long_term_scan byte (offset 30) is the only authority.
-- step_freq in the map header: The scan resolution is now part of the binary map. A special overflow sentinel (0xFFFF) indicates that the true step is in the .gunzmeta file.
-- Jitter window radius is now configurable in the library profile, not just the map header.
-- Zones must be strictly disjoint: Overlapping zones are rejected at plan construction.
-- Run-length overflow splits: When a run exceeds 65535 steps, the first piece keeps its original offset; the next piece starts at offset 0.
-- Long-jump entries are identified only by their sentinel; no flags field is interpreted inside them.
-- ADVANCE instruction now validated for both numerator and denominator non-zero.
-- LOOP instruction has a bounds check to prevent buffer overruns.
-- Many arithmetic and rounding rules have been clarified to guarantee bit‑identical maps on any hardware.
+Choose the parameters that describe your discrete‑clock process:
 
-For the complete list of changes, see the GUNZ 3.35.0 specification.
+| Parameter | Meaning | Example |
+|-----------|---------|---------|
+| `quantum` | Smallest time step (in base time units) | 1 000 000 (1 ms, with `time_unit=9` for ns) |
+| `target_ticks` | Ticks needed to reach the finish line | 1140 |
+| `mult_num` / `mult_den` | Advance multiplier (ticks per quantum) | 48 / 10 (4.8 ticks/ms) |
+| `round_mode` | How to round fractional ticks | 1 (half‑to‑even) |
+| `hold_cycles` / `sep_cycles` | Extra cycles after target | 0 |
+| `time_unit` | Base time scale (0=s, 3=ms, 6=µs, 9=ns, 12=ps) | 9 (nanoseconds) |
+| `reference_block_time` | Ideal block time (your "truth anchor") | 248 000 000 (248 ms in ns) |
+| `jitter_weight` | Penalty for timing jitter | 4 (default) |
+| `advance_regularity_weight` | Penalty for irregular advances | 1 (neutral) |
+| `jitter_window_radius` | Radius of the jitter window; 0 = default (10000, 21 points) | 0 |
+
+The `reference_source` field tells where your anchor came from:  
+0 = explicit (you provided it),  
+1 = guessed (GUNZ computed a seed),  
+2 = calibrated (derived from a previous map),  
+3 = not applicable (no scanning was performed).
+
+### 2. Choose a Frequency Range
+
+Pick a frequency interval and a resolution.  Frequencies are in 10⁻⁵ Hz units.
+
+- `min_freq = 20000000` (200.00000 Hz)
+- `max_freq = 30000000` (300.00000 Hz)
+- `step_freq = 1` (default, 10⁻⁵ Hz resolution)
+
+You can scan as low as 0.00001 Hz.  All zones in a program must be strictly disjoint: the next zone must start at least `step_freq` units after the previous one ends.
+
+### 3. Run the Scan
+
+- **Minimal Profile:** Build a tiny, fully conformant scanner that only handles static zones and writes valid `.gunzmap` files.  No VM, no callbacks, no sandboxing needed.  Perfect for embedded systems or fixed‑range sweeps.
+- **Full Profile:** Use the bytecode VM, dynamic opcodes, and `PURE_CALL` for AI‑driven exploration.
+
+The specification is complete.  You can start minimal and be fully conformant.
+
+### 4. Read the Map
+
+The map shows which frequencies are sweet spots (low jitter, stable), which are detrimental (flagged `FLAG_AVOID`), and where there are large gaps (emitted as long‑jump entries).
+
+- **Sweet spots:** low `block_time_inaccuracy`, low `jitter`, wide `stability_width`.
+- **Detrimental zones:** high jitter or high advance regularity exceeding thresholds.
+- **Long‑jump entries:** gaps larger than ±0.32767 Hz are compressed.  The sentinel is `run_length == 0` and `block_time_inaccuracy == 0`; the gap value is stored as a signed 64‑bit integer in bytes 8–15.
+
+The `step_freq` field in the map header tells you the resolution.  If the overflow flag (`step_freq_overflow`) is 0, the u16 value is exact (0 → default 1).  If the flag is 1, a 4‑byte extension immediately after the header holds the full 32‑bit step size.
+
+### 5. Adjust and Repeat
+
+Use `time_unit` to coarsen or refine the scan, tune the jitter window radius or jitter weight, and chain multiple maps with fingerprint links.
+
+- **Coarse scans** (large `time_unit`, e.g., 3 = ms) are fast and reveal major edges.
+- **Fine scans** (small `time_unit`, e.g., 9 = ns) are more accurate but more expensive.
+- **Adaptive multi‑resolution scanning** is a core design pattern: start coarse, deepen when silent, ascend when costly, verify upward, and re‑probe if no edge appears.
 
 ---
 
-WHERE DO I LEARN MORE?
+## WHAT'S NEW IN 3.60.0?
 
-- The full GUNZ 3.35.0 specification defines every field, formula, and conformance rule. It is the authoritative reference.
-
-- The Lexical Dictionary for Beginners explains all key terms in plain language.
-
-- A companion Philosophy and Origin document (separate from the spec) explains the "why" behind GUNZ.
-
-- The Performance Implementation Guide shows how to build a fast, conformant scanner.
+- **`step_freq` overflow is now self‑contained:** The old `0xFFFF` sentinel is gone.  Instead, byte 31 of the map header is `step_freq_overflow`.  When set, a 4‑byte `u32` extension follows the header, giving the full step size.  Maps remain fully self‑describing without an external metadata file.
+- **`reference_source` can be 3** (not applicable) for maps produced without scanning.
+- **Zone‑disjointness now uses `step_freq`** to guarantee clean grid alignment between zones.
+- **Plateau‑jump guidance improved:** The note now correctly lists all Phase‑1 metrics required for a constant‑score interval.
+- **Many validation and consistency improvements** across all profiles.
 
 ---
 
-SUMMARY: GUNZ IN A NUTSHELL
+## SUMMARY: GUNZ IN A NUTSHELL
 
-Discrete-clock system: Any process that advances in whole ticks (e.g., game engine, hardware timer, motor controller).
-
-Resonance map: A compact table (16 bytes/entry) showing where frequencies are stable, where they jitter, and which to avoid.
-
-Truth anchor: The reference_block_time—the ideal you are trying to achieve. Provenance is tracked (explicit, guessed, calibrated, overflow-clamped).
-
-Jitter: Block-time variation when you nudge the frequency slightly. Measured in base time units.
-
-Advance regularity: Per-cycle advance consistency. High regularity = stable, predictable cycles. Low regularity = variation. Measured in ticks × 100.
-
-Stability width: The width of the stable region around a sweet spot. Wider = more robust to drift.
-
-Phoenix mechanism: Each scan is a checkpoint. Chain maps via fingerprints to create a persistent memory of exploration.
-
-Minimal Profile: Build a tiny, fully conformant scanner with just the static lane and map output. No VM, no callbacks, no sandboxing.
+| Concept | What it means |
+|---------|---------------|
+| Discrete‑clock system | Any process that advances in whole ticks. |
+| Resonance map | Compact table (16 bytes/entry) showing stable, jittery, and avoid‑zones. |
+| Truth anchor | `reference_block_time` – the ideal you’re trying to achieve. |
+| Jitter | Block‑time variation when frequency is nudged slightly. |
+| Advance regularity | Consistency of per‑cycle advances. |
+| Stability width | Width of the stable region around a sweet spot. |
+| Phoenix mechanism | Chain maps via fingerprints to create a persistent exploration memory. |
+| Minimal Profile | Build a tiny, fully conformant scanner.  No VM, no callbacks, no sandboxing. |
+| Self‑contained maps | The `.gunzmap` file alone is enough to decode and verify the data. |
 
 ---
 
-That is GUNZ in a nutshell: a clock-domain resonance scanner that gives you a map of truth, one frequency at a time. The map is the verdict. The metadata is the story. The fingerprint is the seal.
+*That is GUNZ in a nutshell: a clock‑domain resonance scanner that gives you a map of truth, one frequency at a time.  The map is the verdict.  The metadata is the story.  The fingerprint is the seal.*
