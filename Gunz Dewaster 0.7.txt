@@ -1,0 +1,251 @@
+# GUNZ‑DEWASTER — Efficiency‑Horizon Analysis for Resonance Maps  
+*Draft 0.7 — Companion to GUNZ 3.60.0*
+
+---
+
+## 1. Overview
+
+GUNZ‑DEWASTER is a post‑processing companion that analyses an existing GUNZ resonance map and identifies the **Efficiency Horizon** — the set of operating points beyond which any improvement in one metric can only be purchased by degrading another.
+
+The Dewaster does **not** modify the GUNZ core evaluator, nor does it require new byte‑code opcodes. It reads a `.gunzmap` file, applies a deterministic dominance algorithm, and produces an annotated map or a separate horizon report. The scanner remains the unforgiving integer truth anchor; the Dewaster is the lens that reveals when the search has reached the edge of the useful world.
+
+---
+
+## 2. The Efficiency Horizon
+
+For a resonance map and a set of user‑selected **trade‑off metrics**, an operating point **A** *dominates* operating point **B** if:
+
+- **A** is strictly better than **B** in at least one metric, and
+- **A** is no worse than **B** in every other metric.
+
+The **Efficiency Horizon** is the set of all map entries that are not dominated by any other entry in the same map. These entries form the optimal frontier of the scan. Any entry *not* on the horizon is strictly inferior: there exists another operating point in the same scan that matches or beats it in every trade‑off metric, and beats it in at least one.
+
+If two entries have identical values for all trade‑off metrics, neither dominates the other; both shall be included in the horizon if they are not dominated by any other entry. This preserves the full set of equivalent optimal points.
+
+### 2.1 Trade‑Off Metric Directions
+
+The metrics used to define dominance are selected by the user (or the AI agent) according to the engineering goal. For all metrics except `freq`, the direction is intrinsic and fixed:
+
+| Metric | Direction |
+|--------|-----------|
+| `block_time_inaccuracy` | lower is better |
+| `jitter` | lower is better |
+| `advance_regularity` | lower is better |
+| `score` | lower is better |
+| `stability_width` | higher is better |
+| `freq` | user‑declared (minimise or maximise) |
+
+The user may declare the direction for `freq` only. Common configurations:
+
+| Primary metric | Secondary metric | Interpretation |
+|----------------|------------------|----------------|
+| `block_time_inaccuracy` (lower) | `jitter` (lower) | Accuracy vs. stability |
+| `score` (lower) | `freq` (user‑declared) | Overall quality vs. resource cost |
+| `block_time_inaccuracy` (lower) | `stability_width` (higher) | Accuracy vs. robustness |
+
+### 2.2 Entry Filtering
+
+Before the dominance check, the Dewaster shall exclude the following entries from consideration:
+
+- **Long‑jump entries** (sentinel `run_length == 0` and `block_time_inaccuracy == 0`). These represent gaps in the scan, not operating points.
+- **Skipped entries** (`FLAG_SKIPPED` set). These were not evaluated.
+- **Detrimental entries** (`FLAG_AVOID` set). These represent operating points the scanner itself has flagged as undesirable. Including them in the horizon would contradict the scanner's own assessment. A user may explicitly request their inclusion via a configuration flag (`--include‑avoid`), but the default is exclusion.
+
+Additionally, when `stability_width` is among the selected trade‑off metrics, entries with zero `stability_width` are excluded. This prevents the horizon from being cluttered with points that have no measurable stability. If all entries in the map have zero stability width and this metric is selected, the resulting horizon will be empty — a correct reflection of the data. Users may choose to omit `stability_width` from the trade‑off set when scanning at coarse `time_unit`.
+
+---
+
+## 3. Reaching the Horizon – The Dewaster Algorithm
+
+Given a GUNZ resonance map and a choice of trade‑off metrics with their directions, a conformant Dewaster shall determine the Efficiency Horizon by a deterministic procedure whose output depends only on the map and the metric selection.
+
+**Normative dominance check:**
+Let `M` be the list of consolidated map entries after applying the filtering rules of §2.2. An entry `A` dominates entry `B` if, for every trade‑off metric `m`:
+
+- If `m` is “lower‑is‑better”: `A.m ≤ B.m`
+- If `m` is “higher‑is‑better”: `A.m ≥ B.m`
+
+and at least one of the inequalities is strict.
+
+**Determining the horizon:**
+The **Efficiency Horizon** is the subset of entries that are **not** dominated by any other entry. Any deterministic algorithm that produces this exact subset is conformant. The reference algorithm is the naive O(N²) pairwise comparison, which is sufficient for maps containing a few hundred consolidated entries. For larger maps, efficient skyline algorithms (e.g., O(N log N) after sorting) are permitted, provided they produce identical output.
+
+**Output:** The Dewaster shall produce a list of frequency intervals (start‑freq, end‑freq) and their associated metrics for every entry that lies on the Efficiency Horizon. The output format is implementation‑defined; a companion file with extension `.gunzhorizon` is suggested.
+
+---
+
+## 4. Beyond the Horizon – The Doomfall (Normative)
+
+The Efficiency Horizon tells the user which operating points are optimal given the declared trade‑offs. It does not, however, indicate which direction along the frequency axis leads to degradation. The **Doomfall** is an analysis that answers this question: *if I continue scanning in this direction, will things get worse?*
+
+### 4.1 User Inputs for Doomfall
+
+To compute the Doomfall, the user must supply the following inputs beyond those required for the horizon:
+
+| Input | Description |
+|-------|-------------|
+| **Primary metric** | Which trade‑off metric is the user's primary concern. Must be one of the metrics selected for the horizon. |
+| **Scan direction** | `increasing` (default) or `decreasing` — which direction along the frequency axis represents "forward" movement. |
+| **Sufficiency threshold** (optional) | A numeric threshold for how much a secondary metric must improve to offset primary degradation. The threshold is expressed in the natural units of the secondary metric (e.g., nanoseconds for jitter, ticks×100 for advance regularity). The user is responsible for unit consistency. If omitted, any worsening of the primary metric is considered decisive regardless of secondary gains. |
+| **Minimum Doomfall run** (`min_doomfall_run`, optional) | The minimum number of consecutive candidates that must satisfy the Doomfall inclusion condition for a Doomfall interval to be emitted. Recommended default is **5**. |
+| **Baseline window mode** (`baseline_window_mode`, optional) | `stability` (default) or `fixed`. Determines how the local baseline horizon entry is selected for each candidate. |
+| **Baseline window size** (`baseline_window_hz`, optional) | Used only when `baseline_window_mode = fixed`. The frequency window (in Hz) within which the best primary‑metric horizon entry is sought. If omitted, a default of `10.0` Hz is used. |
+| **Maximum baseline distance** (`baseline_max_distance_hz`, optional) | The maximum allowed frequency difference between a candidate and its baseline. If the closest horizon entry is farther than this, the candidate is excluded from Doomfall analysis and treated as unclassified. Default: `20.0` Hz. |
+
+### 4.2 Deterministic Doomfall Algorithm
+
+**Prerequisite guard.** If the Efficiency Horizon is empty, the Doomfall is undefined. The algorithm shall report “No horizon; Doomfall not applicable” and exit cleanly. No Doomfall output shall be produced.
+
+1. **Compute the Efficiency Horizon** \(H\) using the normative procedure (§3). Let \(D\) be the set of all other consolidated entries that passed the filtering rules of §2.2 but are not on the horizon.
+
+2. **Sort** \(D\) in ascending order of frequency (or descending if scan direction is `decreasing`).
+
+3. **Identify the last horizon point** in the scan direction. Let \(f_{\text{last\_h}}\) be the frequency of the horizon entry with the highest frequency (lowest, for `decreasing`). All entries in \(D\) with frequency beyond \(f_{\text{last\_h}}\) in the scan direction are **candidates** for the Doomfall.
+
+4. **For each candidate** \(E\), taken in order of increasing frequency (or decreasing, per scan direction):
+   - **Select the baseline horizon entry** \(h\) as follows:
+     - Find the horizon entry with the smallest absolute frequency difference from the candidate's start frequency. Let that entry be the provisional baseline.
+     - If `--include‑avoid` is active and the provisional baseline has `FLAG_AVOID` set, or if the provisional baseline has `FLAG_AVOID` set in any mode, discard it. Then, among the remaining non‑avoided horizon entries, select the one with the smallest absolute frequency difference.
+     - If no non‑avoided horizon entry exists, the candidate is excluded from Doomfall analysis and treated as unclassified.
+     - If the selected baseline is farther from the candidate than `baseline_max_distance_hz`, the candidate is also excluded and treated as unclassified.
+   - Once the baseline \(h\) is established, determine the baseline window:
+     - **Stability‑based mode:** The window is \([h.\text{freq} - h.\text{stability\_width}, h.\text{freq} + h.\text{stability\_width}]\). If the candidate's start frequency falls outside this window, the candidate is still evaluated using \(h\) as the baseline; the window is only used to restrict the search for a better primary metric. In this mode, the baseline \(h\) is the one selected above.
+     - **Fixed mode:** The window is \([E.\text{start\_freq} - \text{baseline\_window\_hz}, E.\text{start\_freq}]\) (or the corresponding forward window for decreasing scans). If no horizon entry exists within this window, the closest horizon entry (subject to the distance limit) is used as the baseline.
+   - Compute \(\Delta_{\text{primary}}\) as the change in the primary metric from \(h\) to \(E\). The change is *positive* if the primary metric worsens (higher value for a lower‑is‑better metric; lower value for a higher‑is‑better metric). The change is *negative* if the primary metric improves.
+   - For every secondary metric \(m\) (all selected trade‑off metrics except the primary), determine whether \(E.m\) is strictly better than \(h.m\) according to that metric's direction. If it is, record the magnitude of improvement \(\delta_m\).
+   - **Inclusion condition:** \(E\) is added to the Doomfall if **all** of the following hold:
+     - \(\Delta_{\text{primary}} > 0\) (the primary metric has worsened).
+     - Either no secondary metric improves, or for every secondary metric that improves, the improvement \(\delta_m\) is below the user‑supplied sufficiency threshold (if provided). If no threshold is supplied, any worsening of the primary metric qualifies, regardless of secondary improvements.
+   - **No permanent cutoff:** Each candidate's classification is determined independently of its neighbours. A candidate that fails the inclusion condition (e.g., because the primary metric improved) breaks any current Doomfall run, but subsequent candidates may begin a new run if they independently satisfy the condition.
+
+5. **Apply minimum sustained degradation.**
+   Let the classified candidates be a sequence of Boolean values (Doomfall / non‑Doomfall) in frequency order. A Doomfall interval shall consist of **at least `min_doomfall_run` consecutive candidates** that satisfy the inclusion condition. Candidates that satisfy the condition but are part of shorter runs shall be re‑classified as non‑Doomfall. This run‑length filter is applied after the independent classification of each candidate; a recovery candidate resets the run counter, but does not prevent a new run from starting later.
+
+6. **Apply the trailing‑edge exception.**
+   If a run of consecutive Doomfall‑positive candidates extends to the last evaluated candidate in the scan (i.e., reaches the map boundary in the scan direction), and the run has length at least 1 but less than `min_doomfall_run`, that run shall nevertheless be emitted as a Doomfall interval. This ensures that degradation at the edge of the scanned region is never silently discarded. A trailing‑edge Doomfall interval shall be clearly marked in the output (e.g., with a `trailing_edge: true` flag) to distinguish it from confirmed runs that meet the full length requirement.
+
+7. **Merge adjacent runs under restricted conditions.**
+   Adjacent Doomfall runs (after applying the minimum run length and trailing‑edge exception) that are separated by gaps of fewer than `min_doomfall_run` non‑Doomfall candidates **may** be merged into a single contiguous Doomfall interval, but only if **every** non‑Doomfall candidate in the gap failed solely because it did not meet the minimum run length (i.e., it was an isolated positive). If any candidate in the gap failed because the primary metric improved or because a secondary metric exceeded the sufficiency threshold, the gap shall not be merged and shall be treated as a hard boundary between separate Doomfall intervals. This preserves genuine recovery points while smoothing out transient fluctuations.
+
+   When merging is performed, the gap is treated as a transient fluctuation and included in the Doomfall region. The output shall be a single contiguous frequency range `[start_freq, end_freq]` covering all merged runs. No further splitting into sub‑intervals is performed.
+
+8. **Output** the Doomfall intervals, with the same format as the horizon report, but clearly labelled as "Doomfall" and annotated with any `trailing_edge` flags.
+
+### 4.3 Interpretation
+
+The Doomfall identifies a region of the map where the primary metric is degrading and secondary metrics are not improving enough to compensate. For an autonomous agent, this is a natural stop‑signal: continued scanning in this direction is unlikely to yield a better operating point. For a human engineer, the Doomfall is a warning that the trade‑off has turned unfavourable.
+
+The Doomfall is not a prohibition. An operator may knowingly accept a degraded primary metric to achieve a critical secondary goal. The Doomfall simply ensures that the decision is conscious, not accidental.
+
+---
+
+## 5. Relationship to the Phoenix Mechanism
+
+When an AI agent chains scans using the Phoenix mechanism (GUNZ 3.60.0 §7), the Dewaster can serve as a convergence detector and stop‑signal generator:
+
+- **After each scan**, compute the Efficiency Horizon.
+- **Compare** the current horizon to the previous scan's horizon. If the set of horizon frequencies and their metrics are substantially unchanged, the agent has likely converged and may hibernate.
+- **If the Doomfall is enabled**, check whether the agent's current scan range extends into the Doomfall region. If it does, and the agent's declared goal has not changed, the agent should stop — further scanning in that direction will only degrade the primary metric.
+- **Before refining the reference**, verify that the calibrated reference (the best candidate from the previous scan) lies on the horizon of the current scan. If it does not, the new scan has discovered a genuinely better operating point, and the reference should be updated.
+
+---
+
+## 6. Relationship to ORACLE
+
+GUNZ‑ORACLE and GUNZ‑DEWASTER are complementary tools:
+
+| Tool | Question Answered | When to Use |
+|------|-------------------|-------------|
+| **ORACLE** | "Where are the frequencies that satisfy these constraints?" | Before a full scan, to narrow the search range or find a seed reference. |
+| **DEWASTER** | "Among the frequencies I've already scanned, which are the best trade‑offs?" | After a scan, to interpret the results and decide whether to continue. |
+
+ORACLE finds promising regions; DEWASTER evaluates what was found. Together they form a complete decision loop for autonomous GUNZ‑based tuning.
+
+---
+
+## 7. Integration with GUNZ
+
+The Dewaster is an **external tool**. It operates on existing `.gunzmap` files. No new GUNZ opcodes, map versions, or header fields are required.
+
+A conformant Dewaster implementation:
+
+- Shall accept a `.gunzmap` file and a specification of the trade‑off metrics (name, direction).
+- Shall apply the filtering rules of §2.2 before the dominance check.
+- Shall produce a deterministic Efficiency‑Horizon output as defined in §3.
+- Shall implement the Doomfall algorithm (§4) as specified. *(The algorithm is normative and testable.)*
+- May annotate the map by writing a companion file (e.g., `.gunzhorizon`) containing the list of horizon intervals, and optionally the Doomfall intervals.
+- Shall not modify the original `.gunzmap` file unless the implementation writes a separate annotated copy in a clearly distinguished format.
+
+The Dewaster is **not required** for GUNZ conformance, but if a tool claims to implement the Dewaster, it must conform to this specification.
+
+---
+
+## 8. Interpretation Notes *(Informative)*
+
+**Choosing trade‑off metrics:** The same map can have different Efficiency Horizons depending on what the user values. A horizon defined by `(block_time_inaccuracy, jitter)` will highlight the most accurate, stable points. A horizon defined by `(score, frequency)` will highlight the "best value" points across the whole scan. There is no single "true" horizon — only the horizon that corresponds to the user's declared goal.
+
+**Detrimental entries and `--include‑avoid`:** The scanner marks certain entries with `FLAG_AVOID` when they exceed detrimental thresholds. By default, the Dewaster excludes these entries from the horizon because they represent known‑bad operating points. Users who wish to see the full picture, including detrimental entries, may use the `--include‑avoid` flag. This will include `FLAG_AVOID` entries in the dominance check, but the entries will be clearly flagged in the output. **When `--include‑avoid` is active, horizon entries marked `FLAG_AVOID` may appear on the horizon for informational purposes, but they shall not be used as Doomfall baselines. The Doomfall baseline is always selected from the non‑avoided horizon entries. If no non‑avoided baseline exists, the candidate is unclassified.**
+
+**Non‑convex trade‑offs:** The Efficiency Horizon is the set of non‑dominated points; it does not assume convexity. Gaps in the horizon indicate that no operating point exists to fill that particular trade‑off region. The Doomfall analysis is independent of convexity; it relies only on local comparisons between successive entries.
+
+**Decision‑support, not enforcement:** The Dewaster is a cognitive anti‑bias device. It does not prevent action; it prevents accidental drift into unfavourable territory by making the trade‑off visible. The human (or AI) retains full authority. The Dewaster only draws the line.
+
+---
+
+## 9. Conformance
+
+A conformant GUNZ‑DEWASTER implementation must:
+
+- Accept a valid GUNZ `.gunzmap` file as input.
+- Accept a user‑specified set of trade‑off metrics, each with a declared direction (lower‑is‑better or higher‑is‑better).
+- Apply the entry filtering rules of §2.2.
+- Implement the dominance check as defined in §3.
+- Implement the Doomfall algorithm as defined in §4.
+- Produce a deterministic Efficiency‑Horizon output and deterministic Doomfall output (identical for identical inputs and metric selection).
+- Not modify the original `.gunzmap` file unless the implementation writes a separate annotated copy in a clearly distinguished format.
+
+---
+
+## 10. Example
+
+Given a map covering 200–250 Hz with the trade‑off set `(block_time_inaccuracy, jitter)` (both lower‑is‑better), the Dewaster might report:
+
+```
+Efficiency Horizon (block_time_inaccuracy vs jitter):
+  [199.99999 – 200.00000]  inaccuracy=0.000  jitter=0.00
+  [209.79000 – 209.80000]  inaccuracy=1.200  jitter=0.00
+  [249.99999 – 250.00000]  inaccuracy=10.500  jitter=0.00
+```
+
+The first entry is the perfect lock (zero inaccuracy, zero jitter). The second is a faster point with slightly more inaccuracy but still zero jitter. The third is the sweet‑spot 250 Hz with measurable inaccuracy but zero jitter. No other entry in the map matches or beats these three on both metrics simultaneously. All other frequencies are dominated.
+
+To illustrate the dominance check: an entry at 215 Hz with `inaccuracy=2.0, jitter=0.5` would be compared against each horizon candidate. The 209.79 Hz horizon entry has `inaccuracy=1.2, jitter=0.00`. Since 1.2 < 2.0 and 0.00 < 0.5, the horizon entry dominates the 215 Hz entry. The 215 Hz entry is excluded from the horizon.
+
+**Doomfall trace (stability‑based baseline window, primary = block_time_inaccuracy, scan direction = increasing, no sufficiency threshold, min_doomfall_run = 5):**
+
+Candidates beyond the last horizon point (250 Hz) are evaluated sequentially:
+
+| freq | inaccuracy | jitter | Δ primary | classified | reason |
+|------|-----------|--------|-----------|------------|--------|
+| 250.1 | 10.6 | 0.0 | +0.1 (worse) | Doomfall‑positive | primary worsens, no secondary improvement |
+| 250.2 | 10.7 | 0.0 | +0.2 | Doomfall‑positive | |
+| 250.3 | 10.5 | 0.1 | +0.0 (tie, but jitter worsens) | Doomfall‑positive | jitter worsens, primary unchanged |
+| 250.4 | 9.8 | 0.0 | -0.7 (improved) | non‑Doomfall (recovery) | primary improves → run broken |
+| 250.5 | 11.0 | 0.0 | +1.5 | Doomfall‑positive | new run begins |
+| 250.6 | 11.1 | 0.0 | +1.6 | Doomfall‑positive | |
+| 250.7 | 11.2 | 0.0 | +1.7 | Doomfall‑positive | map boundary reached |
+
+- First run: [250.1, 250.3] length 3 → **discarded** (< min_doomfall_run).
+- Second run: [250.5, 250.7] length 3 → **emitted as trailing‑edge Doomfall** (trailing_edge: true) because it reaches the map edge, even though it's shorter than the minimum run.
+
+No merging occurs because the gap at 250.4 is a genuine recovery (primary improved), so it forms a hard boundary. If the gap consisted solely of isolated positives that didn't reach the minimum run, the two runs would be merged into one interval.
+
+Final Doomfall output:
+```
+Doomfall (beyond last horizon point, increasing frequency):
+  [250.5 – 250.7]  inaccuracy rising  (trailing_edge: true)
+```
+
+---
+
+*GUNZ‑DEWASTER — Efficiency‑Horizon Analysis for Resonance Maps — draft 0.7*

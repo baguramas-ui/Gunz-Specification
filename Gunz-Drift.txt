@@ -1,243 +1,277 @@
-# GUNZ‑DRIFT — Intra‑Block Advance Trend Metric Extension  
-*Draft 0.6 — Companion to GUNZ 3.60.0*
+### Patch: Extended `.gunzstats` for Drift (no backward compatibility)
+
+This patch modifies the following sections of GUNZ 3.65.0:
+
+- §4.8 – replace entirely with the mandatory 32‑byte format.
+- §4.9 – replace entirely with the extended compression scheme.
+- §4.6 – add `drift_enabled` metadata field.
+- §4.3 – note that `stats_fingerprint` covers the extended file.
+- §6 – add optional drift support under Runtime.
+
+All other sections remain unchanged.
 
 ---
 
-## 1. Overview
+#### 1.  §4.8 — Raw Statistics Companion File (`.gunzstats`)
 
-GUNZ‑DRIFT extends the GUNZ resonance evaluator with a directional **drift** metric that captures the *intra‑block* accumulation of rounding decisions.  Unlike `advance_regularity`, which measures the variance of per‑cycle advances without regard to order, drift measures the **slope** of those advances across the cycles of a single block.
+**Replace** the existing §4.8 with:
 
-A positive drift means the per‑cycle advance increases over the course of a block (long cycles cluster toward the end).  A negative drift means the advance decreases (long cycles cluster toward the beginning).  A drift of zero indicates that the long and short cycles are uniformly distributed throughout the block.
-
-This metric reveals a dimension of timing behaviour that the existing metrics are blind to — the direction in which rounding decisions accumulate within a block, independent of their magnitude.  It requires no new simulation infrastructure and is computed from data the evaluator already collects.
-
----
-
-**Section — Integration with GUNZ 3.60.0**
-
-GUNZ‑DRIFT is an optional extension to GUNZ 3.60.0.  Implementers must already have a conformant GUNZ 3.60.0 evaluator.  The following hooks describe the minimal changes needed.
-
-**Evaluator hook (§3.11 Phase 1, after step 3 “Discrete simulation of a single block”):**
-
-After the block simulation computes `N`, `N_hi`, `d_lo_cont`, `d_hi_cont`, and `T`, the drift computation is inserted as follows (before the next jitter point is processed):
-
-1. If `N < 2`, set `drift_block = 0` and `peak_drift_candidate = 0` and skip the remaining steps.
-2. Compute the per‑cycle advance sequence using the algorithm of GUNZ‑DRIFT §2.1, with `adv_lo = 100 × d_lo_cont` and `adv_hi = 100 × d_hi_cont`.
-3. Compute `sum_a` and `sum_ia` from the sequence `a_0, …, a_{N-1}`.
-4. Compute the closed‑form sums `S_i = N(N-1)/2` and `S_{i^2} = N(N-1)(2N-1)/6`.
-5. Compute `drift_block = round_half_even(num / den)` using the formula in GUNZ‑DRIFT §2.
-6. If in long‑term mode, repeat for each block and compute the arithmetic mean (`drift`) and the signed maximum absolute value (`peak_drift`) across the measurement window.  In single‑block mode, `drift = drift_block` and `peak_drift = drift_block`.
-
-The drift values are stored in the map entry extension described in GUNZ‑DRIFT §5.1.  The map version must be set to `0x0041`.
-
-**Map‑output hook (§4.2, §4.2.1, §6):**
-
-- The map header `map_version` field shall be `0x0041` when drift is computed.
-- The `xxh3_64` checksum covers the extended 20‑byte entries.
-- The fingerprint computation remains unchanged (it uses the header, not the entries).
-
-**Metadata hook (§4.6):**
-
-- Add the optional boolean field `drift_enabled = true`.
-- Optionally add `drift_weight` if drift is weighted in a custom scoring formula.
-
-**Decoder hook (§6):**
-
-- A conformant GUNZ 3.60.0 decoder that does not support GUNZ‑DRIFT shall reject any map with `map_version = 0x0041` with `GUNZ_MALFORMED_BYTECODE`.
-
-No other sections of GUNZ 3.60.0 are affected.
+> **§4.8 Raw Statistics Companion File (`.gunzstats`)**
+> 
+> The runtime may emit a raw statistics file for any scan.  When `long_term_scan` is active, emitting the file is strongly recommended.  When drift computation is enabled (as defined by the GUNZ‑DRIFT companion extension), the file **shall** be emitted, regardless of scan mode.
+> 
+> All `.gunzstats` files use the same 32‑byte record format.  The magic number is `0x475A4C01` (little‑endian).  No other magic number is valid; a conformant decoder shall reject any `.gunzstats` file whose magic is not `0x475A4C01` with `GUNZ_MALFORMED_BYTECODE`.
+> 
+> **Format** – packed 32‑byte records, one per candidate, in map order:
+> 
+> | Offset | Size | Field | Description |
+> |--------|------|-------|-------------|
+> | 0  | u32 | `block_count` | Number of temporal blocks evaluated. |
+> | 4  | u64 | `sum_block_time` | Sum of block times (base time units). |
+> | 12 | u64 | `sum_block_time_sq` | Sum of squared block times. |
+> | 20 | u16 | `count_adv_lo` | Number of short advances. |
+> | 22 | u16 | `count_adv_hi` | Number of long advances. |
+> | 24 | s16 | `drift` | Intra‑block drift (ticks × 100 per cycle).  Zero if drift is not enabled or `N < 2`. |
+> | 26 | s16 | `peak_drift` | Peak absolute drift observed across the measurement window, with original sign (ticks × 100 per cycle). |
+> | 28 | u32 | `reserved` | Must be zero.  Readers shall reject any file where this field is non‑zero with `GUNZ_MALFORMED_BYTECODE`. |
+> 
+> All time values are in the base time unit.  The number of records equals the total number of candidates evaluated.
+> 
+> When drift is not enabled, the `drift` and `peak_drift` fields shall be written as zero, but the file still uses the 32‑byte record format and magic `0x475A4C01`.  This uniformity simplifies decoders and avoids format‑detection logic.
 
 ---
 
-## 2. Definition
+#### 2.  §4.9 — Compressed Statistics File (`.gunzstatz`)
 
-Let a block consist of `N` cycles.  Each cycle `i` (0‑based) contributes an advance value `a_i` of either `100 × adv_lo` or `100 × adv_hi` (ticks × 100), determined by the placement logic defined in §2.1.
+**Replace** the existing §4.9 with:
 
-The **intra‑block drift** `d` is the slope of the linear least‑squares fit of `a_i` against the cycle index `i`.
-
-\[
-d = \frac{N \cdot \sum (i \cdot a_i) - (\sum i) \cdot (\sum a_i)}{N \cdot \sum (i^2) - (\sum i)^2}
-\]
-
-where all sums run from `i = 0` to `N-1`.
-
-Because the cycle indices form a known arithmetic progression, the sums of `i` and `i^2` have closed forms:
-
-\[
-S_i = \frac{N(N-1)}{2}, \qquad S_{i^2} = \frac{N(N-1)(2N-1)}{6}
-\]
-
-The normative computation is:
-
-```
-sum_a   = Σ a_i          (256‑bit unsigned)
-sum_ia  = Σ (i · a_i)    (256‑bit unsigned)
-num     = N · sum_ia − S_i · sum_a    (signed, may be negative)
-den     = N · S_{i^2} − (S_i)²        (positive for N ≥ 2)
-```
-
-The absolute quotient `q = |num| / den` is computed using the half‑to‑even integer division defined in §4.5.1 of the core GUNZ specification (which applies to non‑negative operands).  The rounded drift value is:
-
-```
-d =  q  if num ≥ 0
-d = −q  if num < 0
-```
-
-Equivalently, for negative numerators the tie‑breaking rule is: if the exact quotient lies exactly halfway between two integers, round to the even integer.  Examples: `−1.5 → −2`, `−0.5 → 0`, `−2.5 → −2`.
-
-All multiplications shall use **256‑bit unsigned arithmetic** to prevent overflow.  The denominator is guaranteed to be positive for `N ≥ 2`.  For `N < 2`, drift is defined as **zero**.
-
-The drift value `d` is a signed integer expressed in **ticks × 100 per cycle**.  It is **not** converted to base time units for storage; the conversion to base time units, if needed for scoring, follows the same pattern as for `advance_regularity` (§3.11 step 4 of the core specification).
-
-### 2.1 Per‑Cycle Advance Sequence (Normative)
-
-The evaluator determines `N_hi` — the number of long cycles in the block — by rounding `N * T / quantum` according to the selected `round_mode`.  This value is computed in §3.11 step 3 of the core specification and is **not** recomputed by the drift algorithm.  The drift metric must assign the long advances to exactly `N_hi` cycles in a pattern that is consistent with the evaluator's own computation but also sensitive to the continuous frequency.
-
-The placement is performed by a deterministic Bresenham‑style error‑accumulation algorithm.  The algorithm guarantees exactly `N_hi` long cycles by construction, so the total block time and `advance_regularity` are unchanged.  The ordering of those long cycles depends on the continuous cycle time `T` through a phase offset derived from the fractional part of `N * T / quantum`, giving drift its discriminative power.
-
-**Initialisation:**
-
-Let `F = N * T` (computed in 128‑bit unsigned, in base time units).  
-Let `R_exact = F % quantum` (remainder, `0 ≤ R_exact < quantum`).
-
-The phase offset `E` is derived from the fractional timing:
-
-```
-E = (R_exact * N) / quantum    (integer division, floor)
-```
-
-Since `R_exact < quantum`, the product `R_exact * N` is at most `(quantum - 1) * N`, and the result `E` is guaranteed to be in the range `[0, N-1]`.  This satisfies the invariant `0 ≤ E < N`, which is the necessary and sufficient condition for the Bresenham loop to produce exactly `N_hi` long cycles.
-
-**Bresenham placement loop** (for `i = 0` to `N-1`):
-
-```
-error = E
-for i = 0 to N-1:
-    error = error + N_hi
-    if (error >= N):
-        a_i = 100 × adv_hi
-        error = error - N
-    else:
-        a_i = 100 × adv_lo
-```
-
-The resulting sequence `a_0, …, a_{N-1}` contains exactly `N_hi` long cycles (value `100 × adv_hi`) and `N − N_hi` short cycles (value `100 × adv_lo`).  The ordering is deterministic and varies with the fractional timing of the block.
-
-**Properties:**
-
-- When `R_exact = 0`, the block time is an exact multiple of the quantum.  The initial error is `E = 0`, and the resulting pattern is the most uniform distribution of long cycles.  Drift will be zero (or very close to zero).
-- As `R_exact` increases toward `quantum`, the initial error approaches `N-1`, producing a front‑loaded or back‑loaded pattern.  The drift formula will detect this as a non‑zero slope.
-
-All intermediate computations shall use **128‑bit unsigned arithmetic** where required to avoid overflow.  The resulting sequence is bit‑identical for all conformant implementations given identical inputs.
-
-The drift metric is only well‑defined when `quantum ≥ 1`.  This condition is inherited from the core GUNZ specification, which requires `quantum ≥ 1` for all valid bytecode programs.
+> **§4.9 Compressed Statistics File (`.gunzstatz`)**
+> 
+> Optional compressed version of `.gunzstats` using delta encoding with run‑length and LEB128.  The file uses the same 32‑byte record structure as the uncompressed file.
+> 
+> **File structure:**
+> 
+> | Offset | Size | Field |
+> |--------|------|-------|
+> | 0  | u32 | `magic` `0x475A4C01` |
+> | 4  | u32 | `candidate_count` |
+> | 8  | u32 | `anchor_freq_raw` |
+> | 12 | 32 bytes | `anchor_record` (first candidate’s statistics, all 32 bytes) |
+> | 44 | … | compressed delta stream |
+> 
+> **Compression algorithm:** For each subsequent candidate, compute signed deltas of the seven fields (`block_count`, `sum_block_time`, `sum_block_time_sq`, `count_adv_lo`, `count_adv_hi`, `drift`, `peak_drift`).  If all deltas are zero, emit byte `0x00` followed by the run length encoded as **unsigned LEB128**.  Otherwise emit a bitmask byte (bits 0‑6 for the seven fields in order) and for each set bit, emit the signed delta encoded as **signed LEB128**.  Bit 7 of the bitmask is reserved and must be zero; if set, the decoder shall reject the file with `GUNZ_MALFORMED_BYTECODE`.
+> 
+> The 4‑byte `reserved` field (offsets 28‑31 of each decompressed record) is **not** delta‑compressed; it is always expected to be zero.  Decoders shall verify that this field is zero after decompression and reject the file with `GUNZ_MALFORMED_BYTECODE` if it is non‑zero.
+> 
+> | Bit | Field |
+> |-----|-------|
+> | 0 | `block_count` |
+> | 1 | `sum_block_time` |
+> | 2 | `sum_block_time_sq` |
+> | 3 | `count_adv_lo` |
+> | 4 | `count_adv_hi` |
+> | 5 | `drift` |
+> | 6 | `peak_drift` |
+> | 7 | (reserved) |
+> 
+> **LEB128 encoding (normative – Full profile only):**  
+> *(Unchanged from the existing specification.)*
 
 ---
 
-## 3. Interpretation
+#### 3.  §4.6 — Map Companion Metadata File (`.gunzmeta`)
 
-| Drift value | Meaning |
-|-------------|---------|
-| `d = 0` | Uniform distribution of long cycles.  No directional bias. |
-| `d > 0` | Long cycles cluster toward the **end** of the block (advance increases). |
-| `d < 0` | Long cycles cluster toward the **beginning** of the block (advance decreases). |
+In the table of mandatory keys, **add** the following row after `long_term_scan`:
 
-The magnitude of `d` is the average change in advance value per cycle, in ticks × 100.
+> | `drift_enabled` | boolean | (Optional) `true` if the drift metric was computed for this scan.  Absent or `false` otherwise. |
 
-Drift is independent of `advance_regularity`.  Two blocks with identical per‑cycle advance variance can have opposite drift if the long cycles are ordered differently.  Drift provides the directional information that variance discards.
+*(`stats_fingerprint` already covers the file; no change needed.)*
 
 ---
 
-## 4. Aggregation in Long‑Term Mode
+#### 4.  §4.3 — Integrity & Fingerprint
 
-When `long_term_scan` is active, the evaluator simulates multiple consecutive blocks for each candidate.  For each block `j`, let `d_j` be the intra‑block drift computed as above.
+In the paragraph discussing `stats_fingerprint`, **add** the following sentence at the end:
 
-The per‑block drift values `d_j` shall be accumulated in a **64‑bit signed** accumulator.  This is sufficient because `|d_j| ≤ 192` under the normative bounds `MAX_N = 2³¹−1` and `quantum ≤ 2³²−1`.
-
-- **Drift (stored):** The arithmetic mean of all `d_j` across the measurement window, rounded half‑to‑even.  The rounding of the mean follows the same signed half‑to‑even convention defined in §2.
-- **Peak drift:** The maximum absolute value of `d_j` across the window, stored with its original sign.
-
-The peak drift is useful for identifying intermittent directional behaviour that may average to zero but cause transient effects.
+> When the extended 32‑byte `.gunzstats` format (magic `0x475A4C01`) is used, the fingerprint covers that file, including the drift fields.
 
 ---
 
-## 5. Storage
+#### 5.  §6 — Conformance
 
-### 5.1 Map Entry Extension
+In the **Runtime** subsection, **add** the following bullet after the existing `.gunzstats`/`.gunzstatz` item:
 
-When drift computation is requested, the standard 16‑byte map entry is extended by **4 bytes**:
+> – Support the `.gunzstats` 32‑byte record format with magic `0x475A4C01`.  Reject any `.gunzstats` file with a different magic.  Drift field computation is optional; implementations that do not support drift shall write zero in those fields.
+
+---
+
+This patch integrates drift into the core specification with no backward‑compatibility baggage.  The map entry and map version remain unchanged.
+
+
+
+
+
+---
+
+## 1. GUNZ‑DRIFT Draft 0.9a (cleaned)
+
+**GUNZ‑DRIFT — Intra‑Block Advance Trend Metric Extension**  
+*Draft 0.9a — Companion to GUNZ 3.65.0*
+
+*[Sections 1–4, 5.2, 5.3, 6–9 are identical to draft 0.9.  Only the sections that contained backward‑compatibility clauses are updated.  The full draft is reproduced below for completeness.]*
+
+---
+
+### 5.1 Drift in the Extended `.gunzstats` File
+
+Drift values are stored in the extended `.gunzstats` file defined by GUNZ 3.65.0 §4.8.  The format uses **32‑byte records** with the following layout:
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
-| 16 | s16 | `drift` | Intra‑block drift (ticks × 100 per cycle).  Zero if `N < 2` or drift is not computed. |
-| 18 | s16 | `peak_drift` | Peak absolute drift observed across blocks (ticks × 100 per cycle), with original sign. |
+| 0  | u32 | `block_count` | Number of temporal blocks evaluated. |
+| 4  | u64 | `sum_block_time` | Sum of block times (base time units). |
+| 12 | u64 | `sum_block_time_sq` | Sum of squared block times. |
+| 20 | u16 | `count_adv_lo` | Number of short advances. |
+| 22 | u16 | `count_adv_hi` | Number of long advances. |
+| 24 | s16 | `drift` | Intra‑block drift (ticks × 100 per cycle).  Zero if drift computation is not enabled or `N < 2`. |
+| 26 | s16 | `peak_drift` | Peak absolute drift observed across the measurement window, with original sign (ticks × 100 per cycle). |
+| 28 | u32 | `reserved` | Must be zero.  Reserved for future use. |
 
-The extended entry size is 20 bytes.  The `xxh3_64` checksum covers the extended entries.
+All time values are in the base time unit.  The number of records equals the total number of candidates evaluated.
 
-Maps using this extension shall set the map version to `0x0041`.  This map version is **reserved exclusively** for the GUNZ‑DRIFT extension.  Other extensions shall not use version `0x0041`.  Decoders that do not support the drift extension shall reject maps with version `0x0041` with `GUNZ_MALFORMED_BYTECODE`.
+The first four bytes of the file shall be the magic number `0x475A4C01` (little‑endian).  This is the **only** valid magic for `.gunzstats` files.  A conformant implementation shall reject any `.gunzstats` file with a different magic number, returning `GUNZ_MALFORMED_BYTECODE`.
 
-### 5.2 Metadata
-
-The `.gunzmeta` file shall include the following additional fields when drift is computed:
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `drift_enabled` | boolean | `true` if the drift metric was computed. |
-| `drift_weight` | integer | (Optional) Weight applied to the drift term in a custom scoring formula, if any. |
-
-The drift values themselves reside in the map entries and the optional raw statistics file.
+The `.gunzstats` file is emitted for any scan mode when drift computation is requested, not only when `long_term_scan` is active.  For single‑block scans, the `block_count` field is `1`, and the `drift` and `peak_drift` fields contain the single‑block drift value.
 
 ---
 
-## 6. Relationship to Other Metrics
-
-- **`advance_regularity`** measures the variance of per‑cycle advance values.  Drift measures the *slope*.  Together they provide a complete description of the distribution and ordering of long cycles within a block.
-- **`jitter`** measures block‑time variation across the jitter window.  Drift is an intra‑block metric and is orthogonal to jitter.
-- **`stability_width`** describes the width of the score valley.  Drift does not affect the score unless explicitly weighted into a custom scoring formula.
-
----
-
-## 7. Integration with the Snowball Metaphor
-
-The snowball rolls within a single block.  The sequence of per‑cycle advances is a trajectory, and the slope of that trajectory is the intra‑block drift.  A block whose long cycles cluster at the end is a snowball that accelerates as it rolls.  A block whose long cycles cluster at the beginning is a snowball that decelerates.  The drift metric captures this internal movement, making the snowball visible at the scale where it currently exists — inside the block.
-
----
-
-## 8. Conformance
+### 8. Conformance
 
 A conformant GUNZ‑DRIFT implementation must:
 
 - Compute drift using the exact least‑squares formula defined in §2, with 256‑bit intermediates for `sum_a`, `sum_ia`, `num`, and `den`.
-- Use a 64‑bit signed accumulator for the long‑term mode sum (§4).
+- Use a 128‑bit signed accumulator for the long‑term mode sum (§4).
 - Apply half‑to‑even rounding to the final division, using the signed rounding convention specified in §2.
-- Produce the per‑cycle advance sequence using the placement algorithm of §2.1, with the initial error `E` derived from `R_exact` as specified.
+- Produce the per‑cycle advance sequence using the placement algorithm of §2.1, with the initial error `E` derived from `rem = (N * T) % quantum` as specified, using the unrounded continuous block time `P = N * T`.
 - Saturate the drift result to a signed 16‑bit integer before storage.
 - Produce bit‑identical drift values for identical inputs.
-- Set map version to `0x0041` when writing extended‑entry maps with drift.
-- Compute peak drift as the maximum absolute value across blocks in long‑term mode, preserving sign.
+- Emit the `.gunzstats` file with magic `0x475A4C01` and 32‑byte records when drift is computed, for any scan mode.
+- Reject any `.gunzstats` file whose magic is not `0x475A4C01` with `GUNZ_MALFORMED_BYTECODE`.
+- Record `drift_enabled = true` in `.gunzmeta`.
+- Compute peak drift as the drift value with the largest absolute magnitude among blocks, preserving its original sign, with a positive‑sign tie‑break.
+- If producing compressed `.gunzstatz`, use bit 5 for `drift` delta and bit 6 for `peak_drift` delta; reject any file with reserved bit 7 set.
 
-Support for GUNZ‑DRIFT is **optional** for GUNZ 3.60.0 conformance.  Implementations that do not support the drift extension shall reject maps with version `0x0041` with `GUNZ_MALFORMED_BYTECODE`.
-
----
-
-## 9. Examples
-
-### 9.1 Non‑Trivial Drift
-
-Consider two frequencies that produce identical `N = 10`, `N_hi = 3`, `d_lo_cont = 5`, `d_hi_cont = 6` (in ticks, before scaling).  Their `jitter` and `advance_regularity` are identical.  However, because `T` differs by a fraction of a quantum, `R_exact` differs, producing different initial errors:
-
-- **Case A:** `R_exact` is small.  `E` is small.  The Bresenham algorithm places long cycles at indices 2, 5, 8.  
-  Drift ≈ +17.3 (positive — long cycles weighted toward the second half).
-
-- **Case B:** `R_exact` is large.  `E` is close to `N-1`.  The Bresenham algorithm places long cycles at indices 0, 3, 6.  
-  Drift ≈ −17.3 (negative — long cycles weighted toward the first half).
-
-Both cases have `advance_regularity ≈ 458.26` (ticks × 100).  Drift distinguishes them, capturing the directional ordering that variance ignores.
-
-### 9.2 Zero Drift
-
-When `R_exact = 0`, the block time is an exact multiple of the quantum.  The initial error is `E = 0`, the Bresenham algorithm produces a perfectly alternating pattern, and drift is zero.  The block has no directional bias.
+Support for GUNZ‑DRIFT is **optional** for GUNZ 3.65.0 conformance.  Implementations that do not support the drift extension shall reject `.gunzstats` files entirely (magic `0x475A4C01`).  Standard 16‑byte map entries are used; no custom map version is emitted.
 
 ---
 
-*GUNZ‑DRIFT — Intra‑Block Advance Trend Metric Extension — draft 0.6*
+*The remaining sections (1–4, 5.2, 5.3, 6, 7, 9) are unchanged from draft 0.9 and are omitted here for brevity.  The full cleaned draft is available as a single document upon request.*
+
+---
+
+## 2. Integration Patch for GUNZ 3.65.0 (no backward compatibility)
+
+This patch modifies the following sections of GUNZ 3.65.0 to integrate drift as a first‑class optional extension, fully aligned with GUNZ‑DRIFT draft 0.9a:
+
+- §4.8 – mandatory 32‑byte `.gunzstats`, magic `0x475A4C01`.
+- §4.9 – extended `.gunzstatz` with drift fields.
+- §4.6 – `drift_enabled` metadata.
+- §4.3 – fingerprint note.
+- §6 – optional drift runtime support.
+
+All other sections remain unchanged.  The map entry stays 16 bytes; map version remains `0x003E`.
+
+---
+
+### 2.1 §4.8 — Raw Statistics Companion File (`.gunzstats`)
+
+**Replace** the existing §4.8 with:
+
+> **§4.8 Raw Statistics Companion File (`.gunzstats`)**
+> 
+> The runtime may emit a raw statistics file for any scan.  When `long_term_scan` is active, emitting the file is strongly recommended.  When drift computation is enabled (as defined by the GUNZ‑DRIFT companion extension), the file **shall** be emitted, regardless of scan mode.
+> 
+> All `.gunzstats` files use the same 32‑byte record format.  The magic number is `0x475A4C01` (little‑endian).  No other magic number is valid; a conformant decoder shall reject any `.gunzstats` file whose magic is not `0x475A4C01` with `GUNZ_MALFORMED_BYTECODE`.
+> 
+> **Format** – packed 32‑byte records, one per candidate, in map order:
+> 
+> | Offset | Size | Field | Description |
+> |--------|------|-------|-------------|
+> | 0  | u32 | `block_count` | Number of temporal blocks evaluated. |
+> | 4  | u64 | `sum_block_time` | Sum of block times (base time units). |
+> | 12 | u64 | `sum_block_time_sq` | Sum of squared block times. |
+> | 20 | u16 | `count_adv_lo` | Number of short advances. |
+> | 22 | u16 | `count_adv_hi` | Number of long advances. |
+> | 24 | s16 | `drift` | Intra‑block drift (ticks × 100 per cycle).  Zero if drift is not enabled or `N < 2`. |
+> | 26 | s16 | `peak_drift` | Peak absolute drift observed across the measurement window, with original sign (ticks × 100 per cycle). |
+> | 28 | u32 | `reserved` | Must be zero.  Readers shall reject any file where this field is non‑zero with `GUNZ_MALFORMED_BYTECODE`. |
+> 
+> All time values are in the base time unit.  The number of records equals the total number of candidates evaluated.
+> 
+> When drift is not enabled, the `drift` and `peak_drift` fields shall be written as zero, but the file still uses the 32‑byte record format and magic `0x475A4C01`.
+
+---
+
+### 2.2 §4.9 — Compressed Statistics File (`.gunzstatz`)
+
+**Replace** the existing §4.9 with:
+
+> **§4.9 Compressed Statistics File (`.gunzstatz`)**
+> 
+> Optional compressed version of `.gunzstats` using delta encoding with run‑length and LEB128.  The file uses the same 32‑byte record structure as the uncompressed file, and the same magic number `0x475A4C01`.
+> 
+> **File structure:**
+> 
+> | Offset | Size | Field |
+> |--------|------|-------|
+> | 0  | u32 | `magic` `0x475A4C01` |
+> | 4  | u32 | `candidate_count` |
+> | 8  | u32 | `anchor_freq_raw` |
+> | 12 | 32 bytes | `anchor_record` (first candidate’s statistics, all 32 bytes) |
+> | 44 | … | compressed delta stream |
+> 
+> **Compression algorithm:** For each subsequent candidate, compute signed deltas of the seven fields (`block_count`, `sum_block_time`, `sum_block_time_sq`, `count_adv_lo`, `count_adv_hi`, `drift`, `peak_drift`).  If all deltas are zero, emit byte `0x00` followed by the run length encoded as **unsigned LEB128**.  Otherwise emit a bitmask byte (bits 0‑6 for the seven fields in order) and for each set bit, emit the signed delta encoded as **signed LEB128**.  Bit 7 of the bitmask is reserved and must be zero; if set, the decoder shall reject the file with `GUNZ_MALFORMED_BYTECODE`.
+> 
+> The 4‑byte `reserved` field (offsets 28‑31 of each decompressed record) is **not** delta‑compressed; it is always expected to be zero.  Decoders shall verify that this field is zero after decompression and reject the file with `GUNZ_MALFORMED_BYTECODE` if it is non‑zero.
+> 
+> | Bit | Field |
+> |-----|-------|
+> | 0 | `block_count` |
+> | 1 | `sum_block_time` |
+> | 2 | `sum_block_time_sq` |
+> | 3 | `count_adv_lo` |
+> | 4 | `count_adv_hi` |
+> | 5 | `drift` |
+> | 6 | `peak_drift` |
+> | 7 | (reserved) |
+> 
+> **LEB128 encoding (normative – Full profile only):**  
+> *(Unchanged from the existing specification.)*
+
+---
+
+### 2.3 §4.6 — Map Companion Metadata File (`.gunzmeta`)
+
+In the table of mandatory keys, **add** the following row after `long_term_scan`:
+
+> | `drift_enabled` | boolean | (Optional) `true` if the drift metric was computed for this scan.  Absent or `false` otherwise. |
+
+---
+
+### 2.4 §4.3 — Integrity & Fingerprint
+
+In the paragraph discussing `stats_fingerprint`, **add** the following sentence at the end:
+
+> When the `.gunzstats` file is present (magic `0x475A4C01`), the fingerprint covers that file, including the drift fields.
+
+---
+
+### 2.5 §6 — Conformance
+
+In the **Runtime** subsection, **add** the following bullet after the existing `.gunzstats`/`.gunzstatz` item:
+
+> – Support the `.gunzstats` 32‑byte record format with magic `0x475A4C01`.  Reject any `.gunzstats` file with a different magic.  Drift field computation is optional; implementations that do not support drift shall write zero in those fields and set `drift_enabled = false` (or omit the field) in `.gunzmeta`.
+
+---
+
+Both the drift extension and the core specification are now fully consistent and contain no backward‑compatibility clauses.  The map entry and map version are unchanged.

@@ -1,0 +1,364 @@
+# GUNZ‑Rosetta — Translation Layer for High‑Level System Descriptions  
+*Draft 0.4 — External Tool for GUNZ 3.60.0*  
+*(Patch 1 applied, 2026‑08‑04)*
+
+---
+
+## 1. Overview
+
+**GUNZ‑Rosetta** is an external, non‑normative translation tool that converts high‑level, user‑friendly system descriptions into deterministic GUNZ parameters (bytecode or plan configurations).  It also provides inverse translation, allowing users to read resonance maps in familiar physical units.
+
+Rosetta does **not** modify the GUNZ core.  It generates standard GUNZ bytecode that is then evaluated by a conformant GUNZ scanner.  The scanner remains the unforgiving integer truth anchor; Rosetta handles the ambiguity of the real world.
+
+The tool is built around **translation profiles** — versioned, auditable, deterministic functions that map a specific domain’s vocabulary (audio clocks, sensor ADCs, financial timestamps, game engine frame pacing) to the GUNZ parameter set.
+
+---
+
+## 2. Architecture: Core and Extensions
+
+Rosetta follows the same architectural pattern as GUNZ itself: a rigorously deterministic core with optional, documented‑limitation extensions.
+
+| Layer | Description | Determinism |
+|-------|-------------|-------------|
+| **Rosetta Core** | Integer‑only translation engine.  Profiles use exact integer arithmetic and rational approximations. | **Bit‑identical** bytecode across any conformant Rosetta implementation. |
+| **Rosetta/FP** (optional extension) | Accepts floating‑point inputs, converts them to integer intermediates using a specific FP implementation, then delegates to the core integer engine. | Deterministic **within a given implementation**, but not guaranteed across different Rosetta implementations. |
+
+A profile is classified as `core` or `fp` based on whether it requires floating‑point input conversion.  Both types ultimately produce integer GUNZ bytecode through a common set of integer conversion steps.  The distinction is only in the input handling and the associated reproducibility guarantee.
+
+---
+
+## 3. Rosetta Core — Integer Translation Engine
+
+### 3.1 Design Principles
+
+The core Rosetta engine is specified with the same rigour as the GUNZ core evaluator:
+
+- All arithmetic is **integer‑only**.  No floating‑point values appear in the core engine.
+- The set of primitive operations is fixed and small.
+- All rounded division uses **half‑to‑even rounding** (matching GUNZ 3.60.0 §4.5.1).
+- Intermediate accumulators use **128‑bit unsigned integers**; wider intermediates (256‑bit) are used where overflow is possible under normative bounds.
+- The rational approximation algorithm uses only integer cross‑multiplication and is guaranteed to produce identical results on any conformant implementation.
+
+### 3.2 Primitive Operations
+
+A conformant Rosetta Core implementation must support the following primitive operations with the specified precision:
+
+| Operation | Inputs | Output | Precision |
+|-----------|--------|--------|-----------|
+| `add(a, b)` | `u128, u128` | `u128` (saturated) | Exact, saturating |
+| `sub(a, b)` | `u128, u128` | `u128` (floor at zero) | Exact |
+| `mul(a, b)` | `u128, u128` | `u256` | Exact |
+| `div_floor(a, b)` | `u256, u128` | `u128` | Exact (floor) |
+| `div_round(a, b)` | `u256, u128` | `u128` | Half‑to‑even rounding |
+| `rational_approx(num, den, max_den)` | `u64, u64, u32` | `(u32, u32)` — reduced numerator and denominator | See §3.3 |
+| `gcd(a, b)` | `u32, u32` | `u32` | Exact |
+| `lcm(a, b)` | `u32, u32` | `u128` | Exact |
+
+`div_floor` and `div_round` follow the GUNZ core arithmetic rules.  `div_floor` truncates toward zero for positive operands (all operands in Rosetta are non‑negative).
+
+`rational_approx` accepts the target value as a rational pair `(num, den)` and a maximum denominator.  It returns the best rational approximation with denominator ≤ `max_den`, reduced to lowest terms.  The algorithm uses integer cross‑multiplication throughout; no floating‑point comparisons are involved.
+
+### 3.3 Standardised Rational Approximation (Integer‑Only)
+
+The algorithm is the Stern‑Brocot tree search, implemented entirely with integer cross‑multiplication.
+
+**Input:** target numerator `T_num`, target denominator `T_den`, maximum denominator `max_den`.
+
+**Output:** reduced numerator `out_num`, reduced denominator `out_den`.
+
+**Algorithm:**
+
+1. Initialise left bound `L = (0, 1)`, right bound `R = (1, 0)`.
+2. Compute the mediant `M = (L.num + R.num, L.den + R.den)`.
+3. If `M.den > max_den`, return the bound closer to the target:
+   - Compare `L` and `R` by computing the absolute differences using cross‑multiplication; return the one with the smaller absolute difference.  If equal, return the one with the smaller denominator.
+4. Compare `M` to the target using cross‑multiplication:
+   - If `M.num * T_den < T_num * M.den`, set `L = M` and repeat from step 2.
+   - Else if `M.num * T_den > T_num * M.den`, set `R = M` and repeat from step 2.
+   - Else (exact match), go to step 5.
+5. Reduce `M` to lowest terms using `gcd(M.num, M.den)` and return.
+
+All intermediate products fit in `u128` because `M.num, M.den ≤ max_den ≤ 2^32−1` and `T_num, T_den ≤ 2^64−1`.
+
+### 3.4 Core Profile Format
+
+A core Rosetta profile is a JSON document with the following structure:
+
+```json
+{
+  "profile_name": "example_profile",
+  "profile_version": "1.0.0",
+  "profile_type": "core",
+  "description": "...",
+  "input_schema": { /* JSON Schema with integer/rational fields only */ },
+  "conversion_steps": [
+    { "op": "...", "args": [...], "output": "..." }
+  ],
+  "output_generation": { /* bytecode assembly rules */ }
+}
+```
+
+Conversion steps are expressed in a small domain‑specific language (DSL) that references only the primitive operations listed in §3.2.  The DSL is defined in Appendix A.  **All fields referenced in `args` must be integer literals, input integers, or the named outputs of previous steps.**
+
+Input fields for core profiles must be integer or rational (pairs of integers).  Floating‑point numbers are not allowed in core profile input schemas.
+
+### 3.5 Determinism Guarantee
+
+Two conformant Rosetta Core implementations, given:
+
+- The same profile (identical name and version),
+- The same input data (all integers),
+- The same scan request (range, step size, output options),
+
+**shall** produce bit‑identical GUNZ bytecode.  This guarantee is enforceable by a conformance suite that tests Rosetta implementations against reference bytecode outputs.
+
+---
+
+## 4. Rosetta/FP — Floating‑Point Extension (Optional)
+
+### 4.1 Purpose and Limitations
+
+Rosetta/FP is an optional extension that allows users to input floating‑point numbers directly.  It converts those floats to integer intermediates using a specific FP implementation, and then delegates to the same deterministic integer conversion engine.
+
+**Limitations:**
+
+- Bit‑identical bytecode is guaranteed **only within the same Rosetta implementation** (same binary, same FP library).  Different implementations may produce slightly different integer parameters from the same floating‑point input.
+- The resulting GUNZ bytecode is still a valid, deterministic program.  A conformant scanner will produce identical maps for identical bytecode.
+- FP profiles must document the exact FP implementation and library version used.
+
+### 4.2 FP Profile Format
+
+An FP profile is a JSON document with `"profile_type": "fp"`.  It includes all the fields of a core profile, plus an `fp_input_conversion` section that defines how floating‑point input fields are converted to integer intermediates before the conversion steps run.
+
+```json
+{
+  "profile_name": "example_fp_profile",
+  "profile_version": "1.0.0",
+  "profile_type": "fp",
+  "description": "...",
+  "fp_input_conversion": {
+    "fp_implementation": {
+      "library": "reference_c_math",
+      "library_version": "1.0.0",
+      "ieee_754_conformance": "double_precision_round_to_nearest_even"
+    },
+    "conversions": [
+      { "input_field": "multiplier_float", "output": "mult_num, mult_den", "method": "rational_approx_fp" }
+    ]
+  },
+  "input_schema": { /* JSON Schema, may include float fields */ },
+  "conversion_steps": [ /* integer‑only steps, using the intermediates produced above */ ],
+  "output_generation": { /* bytecode assembly rules */ }
+}
+```
+
+The `fp_input_conversion` section is processed **before** the integer conversion steps.  It applies the specified floating‑point operations (currently only `rational_approx_fp`, which approximates a float as a rational pair) using the documented FP library.  The resulting integer intermediates are then available to the conversion steps, exactly as if they had been supplied as input.
+
+*(Note)* The initial conversion from float to rational pair is implementation‑dependent; this is the sole reason that FP profiles do not guarantee cross‑implementation bytecode identity.  The subsequent integer conversion steps are fully deterministic.
+
+Because the floating‑point conversion is library‑dependent, the reproducibility of FP profiles is limited to the same Rosetta binary and library version.
+
+### 4.3 Reproducibility Metadata
+
+When Rosetta generates bytecode, it shall record the following in the `.gunzmeta` file:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `rosetta_profile` | object | `{ "name": "...", "version": "..." }` |
+| `rosetta_profile_hash` | string | SHA‑256 of the profile document |
+| `rosetta_implementation` | string | Name and version of the Rosetta binary used |
+| `rosetta_fp_library` | string | FP library name and version (FP profiles only) |
+
+For core profiles, the `rosetta_fp_library` field may be omitted.
+
+---
+
+## 5. Rosetta Tool Usage
+
+### 5.1 Translating a Description into Bytecode
+
+```
+gunz-rosetta translate \
+    --profile "generic_floating_point_int" \
+    --profile-version "1.0.0" \
+    --input system.json \
+    --scan-range 200.0 300.0 \
+    --step-hz 0.00001 \
+    --output scan.gunzb
+```
+
+Where `system.json` contains the input fields defined by the profile’s input schema.  Rosetta:
+
+1. Validates the input against the schema.
+2. If the profile is FP, runs `fp_input_conversion` to produce integer intermediates.
+3. Applies the integer conversion steps in order, using the core engine.
+4. Constructs a GUNZ bytecode file (`scan.gunzb`) that encodes the converted parameters and scan request.
+5. Records profile metadata in a sidecar `.gunzmeta` file (if GUNZ metadata generation is enabled).
+
+### 5.2 Reading and Annotating Maps
+
+```
+gunz-rosetta display scan.gunzmap \
+    --profile "generic_floating_point_int" \
+    --profile-version "1.0.0"
+```
+
+Rosetta reads the map and profile, converts frequencies and timing values back to the user’s preferred units, and outputs a human‑readable summary or annotated JSON.
+
+### 5.3 Profile Validation
+
+```
+gunz-rosetta validate profile.json
+```
+
+Rosetta validates the profile’s input schema, conversion steps, and output generation rules, checking that all operations are supported and that the profile can produce valid GUNZ bytecode.
+
+---
+
+## 6. Profile Registry and Versioning
+
+Rosetta maintains a local registry of installed profiles.  Profiles are immutable once published under a given version.  The registry stores:
+
+- The profile document (JSON).
+- A SHA‑256 content‑hash of the profile.
+- The profile’s type (`core` or `fp`).
+
+Reproducibility requires that the exact profile version be recorded in the `.gunzmeta` file.  For core profiles, this is sufficient for byte‑level reproducibility across implementations.  For FP profiles, the implementation and library version are also required (§4.3).
+
+---
+
+## 7. Examples
+
+### 7.1 Core Profile: `generic_floating_point_int`
+
+**Profile name:** `generic_floating_point_int`  
+**Profile version:** `1.0.0`  
+**Profile type:** `core`  
+**Description:** Converts a timing model described by integer clock rate (numerator/denominator), integer target duration (numerator/denominator), and integer multiplier (numerator/denominator) into GUNZ parameters.
+
+**Input schema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "clock_rate_num": { "type": "integer", "minimum": 1 },
+    "clock_rate_den": { "type": "integer", "minimum": 1 },
+    "target_duration_num": { "type": "integer", "minimum": 0 },
+    "target_duration_den": { "type": "integer", "minimum": 1 },
+    "mult_num": { "type": "integer", "minimum": 1 },
+    "mult_den": { "type": "integer", "minimum": 1 },
+    "hold_frames": { "type": "integer", "default": 0 },
+    "sep_frames": { "type": "integer", "default": 0 },
+    "rounding": {
+      "type": "string",
+      "enum": ["floor", "nearest_half_even", "ceil", "truncate"],
+      "default": "nearest_half_even"
+    }
+  },
+  "required": ["clock_rate_num", "clock_rate_den", "target_duration_num", "target_duration_den", "mult_num", "mult_den"]
+}
+```
+
+**Conversion steps (summary):**
+
+1. **Choose `time_unit`.** For each candidate `tu` from 0 to 12, compute the integer clock period `T_tick_base = div_round(10^tu * clock_rate_den, clock_rate_num)`.  The first candidate that yields an exact integer (remainder zero) and satisfies `T_tick_base ≤ UINT32_MAX` is selected.  If no candidate meets both conditions, fail with the error: “Clock rate is too high for the supported time‑unit range. Reduce the clock rate or manually choose a coarser time unit.”
+2. **Set `quantum`** = `T_tick_base` (u32).
+3. **Set `target_ticks`.** Compute `num = mul(target_duration_num, clock_rate_num)`, `den = mul(target_duration_den, clock_rate_den)`, then `target_ticks = div_round(num, den)`.  Saturate to `UINT32_MAX`; if the exact value exceeds `UINT32_MAX`, fail with an error.
+4. **Reduce multiplier.** `mult_num = div_floor(mult_num, gcd(mult_num, mult_den))`, similarly for `mult_den`.
+5. **Set `hold_cycles`** = `hold_frames`, `sep_cycles` = `sep_frames`.
+6. **Set `round_mode`** by mapping the string.
+7. **Build bytecode.**
+
+*(The full DSL for these steps appears in Appendix B.)*
+
+### 7.2 FP Profile: `generic_floating_point_fp`
+
+**Profile name:** `generic_floating_point_fp`  
+**Profile version:** `1.0.0`  
+**Profile type:** `fp`  
+**Description:** Like `generic_floating_point_int`, but accepts floating‑point multiplier and converts it to a rational before the core conversion steps.
+
+**Input schema:** Same as `generic_floating_point_int`, but with `multiplier_float` (a number) replacing `mult_num`/`mult_den`.
+
+**FP input conversion:**
+
+```json
+"fp_input_conversion": {
+  "fp_implementation": {
+    "library": "reference_c_math",
+    "library_version": "1.0.0",
+    "ieee_754_conformance": "double_precision_round_to_nearest_even"
+  },
+  "conversions": [
+    {
+      "input_field": "multiplier_float",
+      "output": ["mult_num", "mult_den"],
+      "method": "rational_approx_fp",
+      "max_den": 4294967295
+    }
+  ]
+}
+```
+
+The `rational_approx_fp` method uses the Stern‑Brocot tree (as in §3.3) after converting the float to a rational pair using the reference FP library.  The resulting `mult_num` and `mult_den` are then fed into the integer conversion steps, which are identical to those in the core profile.
+
+*(Note)* The initial conversion from float to rational pair is implementation‑dependent; this is the sole reason that FP profiles do not guarantee cross‑implementation bytecode identity.  The subsequent integer conversion steps are fully deterministic.
+
+**Conversion steps:** Identical to `generic_floating_point_int` (they reference `mult_num` and `mult_den`, which are now populated by the FP pre‑processing).
+
+**Reproducibility:** Bytecode bit‑identity is guaranteed only within the same Rosetta binary and FP library version.
+
+---
+
+## 8. Determinism and Auditability
+
+The GUNZ‑Rosetta reproducibility model has two tiers:
+
+| Tier | Scope | Guarantee |
+|------|-------|-----------|
+| **Map** | GUNZ scanner output | Bit‑identical for identical bytecode, always. |
+| **Bytecode (core profiles)** | Rosetta Core output | Bit‑identical across conformant Rosetta implementations. |
+| **Bytecode (FP profiles)** | Rosetta/FP output | Identical within the same Rosetta binary and FP library.  Not guaranteed across implementations. |
+
+Auditability flows from the map upward.  A map can always be verified by re‑scanning with the original bytecode.  The bytecode can be verified against the profile and input if the core engine was used.  For FP profiles, full verification requires the original Rosetta binary and FP library.
+
+---
+
+## 9. Relationship to GUNZ
+
+GUNZ‑Rosetta is **not** a normative specification.  It is an external tool that generates standard GUNZ bytecode.  The GUNZ core evaluator processes this bytecode exactly as it would any other.  If Rosetta produces incorrect parameters, the map will be wrong — but deterministically wrong, and a conformant scanner will faithfully produce whatever the parameters dictate.
+
+This separation ensures:
+
+- **The core scanner remains pure.**  No floating‑point logic, no conversion ambiguity.
+- **Rosetta can evolve independently.**
+- **Rosetta can have bugs.**  The scanner is the ultimate truth anchor.
+
+---
+
+## Appendix A — Conversion Step DSL (Normative for Core Profiles)
+
+Each conversion step is a JSON object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `op` | string | Operation name from the core primitive set. |
+| `args` | array | Input arguments.  Each is a literal integer, a reference to an input field (`"$input.clock_rate_num"`), or a reference to a previous step by its `output` name (`"$quantum"`).  **Step indices are not allowed.** |
+| `output` | string | Name for the result (referenced by later steps). |
+
+Supported operations: `add`, `sub`, `mul`, `div_floor`, `div_round`, `rational_approx`, `gcd`, `lcm`.
+
+The engine resolves references, executes the operation using the precision specified in §3.2, and stores the result under the output name.
+
+*(Informative)* The conversion step language is currently specified in prose.  A formal EBNF grammar may be provided in a future revision or in a separate Rosetta‑DSL companion document.  Implementers should refer to the Rosetta reference implementation for the authoritative parser behaviour.
+
+---
+
+## Appendix B — Full Core Profile Example
+
+*(The complete JSON document for `generic_floating_point_int`, including the conversion step DSL and bytecode generation rules, is provided with the Rosetta reference implementation.)*
+
+---
+
+*GUNZ‑Rosetta — Translation Layer for High‑Level System Descriptions — draft 0.4*

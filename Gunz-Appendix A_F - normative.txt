@@ -1,0 +1,234 @@
+---
+
+## Appendix A — Implementation‑Defined Parameters *(Informative)*
+
+| Parameter | Section | Value / Note |
+|-----------|---------|--------------|
+| Object table max entries | 3.9 | ≥ 256 |
+| Arena size | 3.1 | – |
+| `ScratchArena` minimum size (recommended) | 3.1 | 128 MiB |
+| Plan complexity threshold (evaluator blocks) | 3.4.1 | ≥ 65 536 (implementations SHALL support at least this; may support more) |
+| SIMD vector width | 3.4.2 | – |
+| `ScratchArena` layout | 3.3 | – |
+| Object lifetime tracking | 3.9 | e.g., reference counting, GC |
+| Negative cache eviction | 3.4.4 | – |
+| Map cache eviction | 4.3 | TinyLFU, LRU, etc. |
+| `MAX_STATIC_EVALUATORS` | 3.4.1 | ≥ 65 536 |
+| `max_scan_iterations` (plan, per zone) | 3.4.1 | ≥ 2²⁴ (16 777 216) |
+| `max_eval_iterations` (plan, non‑long‑term) | 3.4.1 | ≥ 65 536 |
+| `total_max_scan_iterations` (plan, global) | 3.4.1 | ≥ 2²⁶ (67 108 864) |
+| Default scan resolution | 2.3.1 | 1 (10⁻⁵ Hz) |
+| Normative maximum `window_duration` | 3.11 | ≤ 2³² − 1 base‑time units |
+| Initial fuel (production) | 3.5 | User‑defined; conformance testing uses 10 000. |
+
+---
+
+## Appendix B — Example: Decoding a GUNZ 3.62.0 Resonance Map
+
+This example walks through the decoding of a synthetic map containing all major entry types. All multi‑byte integers are little‑endian; frequencies are in 10⁻⁵ Hz units unless converted for display. The `.gunzmap` file contains only the map header and entries; there is no bytecode header.
+
+---
+
+### B.1 Raw Map Hex Dump
+
+```
+-- Map header (32 bytes) --
+C0 EA 21 01  05 2E C8 0E  01 04 01 00  00 00 09 01
+3B 00 00 00  00 00 00 00  02 00 00 00  01 00 00 00
+
+-- Entry 1 (normal) --
+D9 01 64 00  98 B1 01 00  00 00 62 00  62 00 00 00
+
+-- Entry 2 (normal) --
+C8 00 96 00  50 C3 00 00  05 00 0A 00  0C 00 14 00
+
+-- Entry 3 (long jump) --
+00 00 00 00  00 00 00 00  40 4B 4C 00 00 00 00 00
+
+-- Entry 4 (normal) --
+00 00 C8 00  40 0D 03 00  14 00 1E 00  23 00 64 00
+
+-- Entry 5 (skipped) --
+00 00 64 00  00 00 00 00  00 04 00 00  00 00 00 00
+
+-- Entry 6 (detrimental) --
+00 00 32 00  40 E2 01 00  FF 02 FF 00  FF 00 00 00
+```
+
+*(The XXH3‑64 checksum is placeholder zeros; in a real map this field contains the checksum of the entry data.)*
+
+---
+
+### B.2 Header Decoding
+
+**Map header (32 bytes):**
+
+| Offset | Field | Hex | Value | Meaning |
+|--------|-------|-----|-------|---------|
+| 0‑3  | `base_freq` | `C0 EA 21 01` | 19 000 000 | 190.00000 Hz |
+| 4‑7  | `reference_block_time` | `05 2E C8 0E` | 248 000 005 ns | ≈ 248.000 ms |
+| 8 | `advance_regularity_weight` | `01` | 1 | Weight for advance regularity |
+| 9 | `jitter_weight` | `04` | 4 | Weight for jitter |
+| 10‑11 | `step_freq` | `01 00` | 1 | 10⁻⁵ Hz resolution |
+| 12 | `map_type` | `00` | 0 | standard |
+| 13 | `detrimental_jitter_threshold` | `00` | 0 | default (255) |
+| 14 | `time_unit` | `09` | 9 | nanoseconds |
+| 15 | `stability_mapping_flag` | `01` | 1 | must be 1 |
+| 16‑17 | `map_version` | `3B 00` | 0x003B | 3.62.x |
+| 18 | `jitter_window_radius` | `00` | 0 | default (10000, 21 points) |
+| 19‑20 | `detrimental_advance_regularity_threshold` | `00 00` | 0 | default (65535) |
+| 21 | `reference_source` | `02` | 2 | calibrated |
+| 22‑29 | `xxh3_64` (placeholder) | 8 bytes zeros | | |
+| 30 | `long_term_scan` | `01` | 1 | long‑term scan |
+| 31 | `step_freq_overflow` | `00` | 0 | exact step size in `step_freq` |
+
+---
+
+### B.3 Entry‑by‑Entry Decoding
+
+We maintain a current frequency position starting at `base_freq`.
+
+#### Entry 1 – Normal
+`freq_delta_start = 0x01D9 = 473` → 190.00473 Hz  
+`run_length = 100` → covers 190.00473–190.00573 Hz  
+`block_time_inaccuracy = 111 000 ns`, `jitter = 0`, `advance_regularity = 98`, `peak_advance_regularity = 98`, `stability_width = 0`, `flags = 0`.
+
+#### Entry 2 – Normal
+`freq_delta_start = 200` → start 190.00773 Hz, run 150 → end 190.00923 Hz  
+`block_time_inaccuracy = 50 000 ns`, `jitter = 5 ns`, `advance_regularity = 10`, `peak_advance_regularity = 12`, `stability_width = 20` (0.002 Hz), `flags = 0`.
+
+#### Entry 3 – Long Jump
+Sentinel: `run_length == 0`, `block_time_inaccuracy == 0`.  
+Bytes 8–15 (`40 4B 4C 00 00 00 00 00`) give a little‑endian `s64` gap of 5 000 000 steps → jump 50.00000 Hz to 240.00923 Hz.  
+The individual fields at offsets 8–15 are not interpreted separately; they form part of the gap value. The entry is implicitly skipped.
+
+#### Entry 4 – Normal
+`freq_delta_start = 0` → start 240.00923 Hz, run 200 → end 240.01123 Hz  
+`block_time_inaccuracy = 200 000 ns`, `jitter = 20 ns`, `advance_regularity = 30`, `peak_advance_regularity = 35`, `stability_width = 100` (0.010 Hz), `flags = 0`.
+
+#### Entry 5 – Skipped
+`flags = 0x04` (`FLAG_SKIPPED`), `run_length = 100`, all quantitative metrics zero. Advances to 240.01223 Hz.
+
+#### Entry 6 – Detrimental
+`flags = 0x02` (`FLAG_AVOID`), `run_length = 50`, `block_time_inaccuracy = 123 456 ns`, `jitter = 255`, `advance_regularity = 255`, `peak_advance_regularity = 255`, `stability_width = 0`. Range 240.01223–240.01273 Hz.
+
+---
+
+### B.4 Visual Frequency Axis
+
+```
+190.00000                   base_freq
+     |
+     v
+190.00473 – 190.00573       [Normal #1]  jitter 0 ns, advance_reg 98
+     |
+     + 0.00200 delta
+190.00773 – 190.00923       [Normal #2]  jitter 5 ns, width 0.002 Hz
+     |
+     + 50.00000 long jump   (gap, implicitly skipped)
+240.00923 – 240.01123       [Normal #4]  jitter 20 ns, width 0.010 Hz
+     |
+     + 0.00100 skipped
+240.01223 – 240.01273       [Avoid #6]   jitter 255 (bad!), advance_reg 255
+```
+
+---
+
+## Appendix C — Rationale for Constants *(Informative)*
+
+The following table provides the engineering rationale for selected normative constants used in **GUNZ 3.62.0**:
+
+| Constant | Value | Justification |
+|----------|-------|---------------|
+| `jitter_weight` default | 4 | Empirically calibrated for real‑time interactive systems where even sub‑millisecond jitter can cause a missed input cycle. The factor 4 penalises jitter sufficiently to distinguish stable regions from marginal ones without drowning the other score components. |
+| `advance_regularity_weight` default | 1 | Neutral weighting for per‑cycle advance variation. This metric is not inherently detrimental; it reflects internal consistency. Users may adjust it based on application needs. |
+| `jitter_window_radius` default | 10 000 (21 points, ±0.1 Hz) | The 21‑point window provides dense local sampling of the resonance landscape while keeping the scan overhead moderate. The ±0.1 Hz neighbourhood is wide enough to capture phase‑transition edges in typical discrete‑clock engines. |
+| `initial_fuel` (conformance) | 10 000 | Chosen to keep the conformance test suite lightweight and deterministic; large enough to allow meaningful dynamic programs without excessive execution time. |
+| `MAX_STATIC_EVALUATORS` | ≥ 65 536 | Derived from practical memory limits: with 16‑byte map entries and typical scratch‑arena sizes, a plan with more than 65 536 evaluator blocks would stress embedded systems. The value may be increased by implementations that support larger plans. |
+| `max_scan_iterations` (per zone) lower bound | 2²⁴ (16 777 216) | Represents a reasonable worst‑case scan of ~168 Hz at 10⁻⁵ Hz resolution. Exceeding this suggests an AI agent should use multi‑resolution scanning. |
+| `window_duration` maximum | ≤ 2³² − 1 base‑time units | Ensures that the product of cycle time and window duration never overflows a 64‑bit accumulator in long‑term mode. |
+| `DELTA` override existence | – | Preserves the ability to model engines (such as the RealSpace2 core) where the temporal pattern of cycles is fixed but the effective work per cycle can be independently varied. This feature is only available in the dynamic lane and is not required for minimal conformance. |
+
+---
+
+## Appendix D — Error Codes Summary
+
+| Code | Name | Category | Description |
+|------|------|----------|-------------|
+| 0 | `GUNZ_OK` | Success | Operation completed successfully. |
+| 1 | `GUNZ_CALLBACK_FAILED` | Runtime | A `PURE_CALL` returned a failure status. |
+| 2 | `GUNZ_ARENA_EXHAUSTED` | Runtime | The scratch arena ran out of memory. |
+| 3 | `GUNZ_INVALID_LIBRARY` | Validation | A library profile is invalid or mismatched. |
+| 4 | `GUNZ_MALFORMED_BYTECODE` | Syntax | The bytecode is malformed or contains an invalid opcode/flag. |
+| 5 | `GUNZ_FUEL_EXHAUSTED` | Runtime | VM fuel exhausted; partial map returned. |
+| 6 | `GUNZ_INVALID_OBJECT` | Validation | An `object_id` is invalid or not allocated. |
+| 7 | `GUNZ_ITERATION_LIMIT_EXCEEDED` | Runtime | Scan iteration limit exceeded; partial map returned. |
+| 8 | `GUNZ_SANDBOX_VIOLATION` | Security | A sandboxed callback attempted a forbidden operation (e.g., reading mutable memory). |
+
+**Category notes:**
+- **Syntax:** Bytecode parsing errors.
+- **Validation:** Incorrect parameters, mismatched fields, out‑of‑range values.
+- **Security:** Sandbox violations, attestation failures.
+- **Runtime:** Execution errors (fuel, arena, callbacks, iteration limits).
+
+---
+
+## Appendix E — Minimal Conformance Vectors (Normative)
+
+A minimal set of bytecode programs and their expected resonance maps is provided in the companion conformance suite.  The suite includes reference outputs for all normative arithmetic paths, rounding modes, map‑entry types, the `jitter_weight` and `advance_regularity_weight` header fields, `SCAN_RES` non‑zero flags rejection, `HALT`‑with‑zero‑fuel, `lane_requirements` mask validation, fuel‑exhaustion vs. iteration‑limit precedence, `reference_source` validation, zero‑weight decoder rejection, reserved field validation, low‑frequency zone handling (frequencies as low as 1), the removal of the `FLAG_LONG_TERM` per‑entry flag, long‑jump entry handling in `JOIN` and decoding, `LOOP` bounds‑check rejection, `ADVANCE` zero‑operand rejection, and `step_freq` header field validation.
+
+**Minimal smoke‑test vector (informative):**  
+*(The exact bytecode and expected map hex will be generated by the reference implementation and included in the final published version of this appendix.  Implementers may use the companion conformance suite for comprehensive vectors.)*
+
+---
+
+#### Appendix F — Reference Sandbox and Environment Snapshot Example *(Informative)*
+
+**F.1 Minimal WebAssembly Sandbox (Conceptual)**
+
+The following is a sketch of a minimal, deterministic WebAssembly sandbox that satisfies the `PURE_CALL` sandboxing requirements of §3.7.  It is provided as a reference to help implementers understand the expected isolation model.
+
+- **Runtime:** A standalone WebAssembly runtime (e.g., Wasmtime or Wasmer) configured with *no host imports*.  Only the WASI‑null interface is available.
+- **Determinism:** All non‑deterministic WASI calls (clock, random) are replaced by deterministic stubs that return fixed values (e.g., clock always returns 0, random always returns 0).
+- **Memory limit:** 64 MiB of linear memory; any growth beyond this limit causes instant trap and is reported as `GUNZ_CALLBACK_FAILED`.
+- **CPU budget:** A fixed instruction count limit (e.g., 1 000 000 WebAssembly instructions) per invocation.  If the limit is exceeded, the sandbox traps and the callback is considered failed.
+- **Integration with GUNZ:** Before execution, the runtime compiles the `.wasm` module and instantiates it once.  For each `PURE_CALL`, the runtime calls the exported function specified by the bytecode’s `callback_id`, passing the argument array as a single linear‑memory buffer.  The return value is read from a predefined memory location.
+
+This model provides isolation (no host filesystem, no network), determinism (no unpredictable external inputs), and resource limits (memory and CPU).  It is one possible implementation; any mechanism that guarantees the same properties is acceptable.
+
+**F.2 Sample CBOR Environment Snapshot**
+
+Below is a minimal, annotated example of a CBOR‑encoded Environment Snapshot (§4.7).  The snapshot is signed with an Ed25519 key; the signature field is omitted here for brevity (a full example would include a 64‑byte signature).
+
+```
+A5                                      # map(5)
+  66                                    # text(6)
+     736e617073686f745f76657273696f6e   # "snapshot_version"
+  01                                    # unsigned(1)
+  67                                    # text(7)
+     6361706162696c6974696573           # "capabilities"
+  1B 0000000000000001                   # unsigned(1) – bitmask: SIMD_AVAILABLE = 1
+  64                                    # text(4)
+     7374617473                        # "stats"
+  A2                                    # map(2)
+     6A                                # text(10)
+        6c6173745f7363616e5f6475726174696f6e  # "last_scan_duration"
+     18 3E8                             # unsigned(1000) – 1000 ms
+     6D                                # text(13)
+        746f74616c5f6576616c756174696f6e73  # "total_evaluations"
+     19 2710                            # unsigned(10000)
+  67                                    # text(7)
+     74696d657374616d70                 # "timestamp"
+  1B 0000018D2A3B4C5D                 # unsigned(1700000000000) – example POSIX ms
+  68                                    # text(8)
+     6d65746164617461                   # "metadata"
+  A1                                    # map(1)
+     6E                                # text(14)
+        67656e657261746f725f6964       # "generator_id"
+     50                                # bytes(16)
+        4C616E636547554E5A0000000000000000  # "ceGUNZ\0\0\0\0\0\0\0\0"
+```
+
+The top‑level keys are sorted lexicographically as required by canonical CBOR.  The `capabilities` bitmask here declares that SIMD is available (bit 0).  The `stats` map contains two example entries: `last_scan_duration` (1000 ms) and `total_evaluations` (10 000).  The `timestamp` is a POSIX UTC milliseconds value.  The `metadata` map contains a single key `generator_id` with an arbitrary byte‑string payload.
+
+In a real snapshot the map would also include a `signature` key (byte string of 64 bytes) placed last in lexicographic order.  The signature must be validated by the runtime before the snapshot is bound to a plan.
