@@ -1,196 +1,17 @@
-#### Merged Patch – Unified Statistics Format (`.gunzstats` / `.gunzstatz`) with Drift Support (Final)
-
-**Base Version:** GUNZ 3.65.0  
-**Modifications:** Replace §4.8, §4.9 entirely. Add to §4.6, §4.3, §6.  
-**New Magic:** `0x475A4C02` (applies to both raw and compressed stats files).
-
----
-
-### Overlap Analysis (Where the Two Patches Converged)
-
-The **following sections are identical in intent** and were merged without conflict:
-
-| Section | Your Patch | My Patch | Merge Result |
-| :--- | :--- | :--- | :--- |
-| **§4.6 – `drift_enabled`** | Add boolean metadata field | Same | ✅ Merged unchanged |
-| **§4.3 – `stats_fingerprint`** | Add note covering drift fields | Same | ✅ Merged unchanged |
-| **§6 – Conformance** | Add mandatory support for magic `0x475A4C01` | Add mandatory support for magic `0x475A4C02` | ✅ **Magic updated to `0x475A4C02`** |
-
----
-
-### Divergence and Resolution (Where the Patches Differed)
-
-| Aspect | Your Patch (`0x475A4C01`) | My Patch (`0x475A4C02`) | Resolution |
-| :--- | :--- | :--- | :--- |
-| **Magic number** | `0x475A4C01` | `0x475A4C02` | **Adopt `0x475A4C02`** (clean break, no backward compatibility, future‑proof) |
-| **`reserved` field in `.gunzstats`** | Must be zero; decoders reject non‑zero | No validation; part of compressed stream | **Adopt my version** (allows future extension of `reserved` without format change) |
-| **`reserved` in `.gunzstatz`** | Not delta‑compressed; always expected zero; decoder validates | Delta‑compressed as bit 7; fully compressible | **Adopt my version** (`reserved` is an active, compressible field) |
-| **Bitmask bits** | 0‑6 only; bit 7 reserved, must be zero | 0‑7 (bit 7 = `reserved`) | **Adopt my version** (bit 7 is now live) |
-
-**Resolution Summary:** Your patch's drift integration is preserved in full. The only structural change is the magic bump to `0x475A4C02` and the repurposing of the `reserved` field as a compressible, future‑extensible field.
-
----
-
-### Final Merged Patch
-
----
-
-#### 1. §4.8 — Raw Statistics Companion File (`.gunzstats`)
-
-**Replace the existing §4.8 with:**
-
-> **§4.8 Raw Statistics Companion File (`.gunzstats`)**
-> 
-> The runtime may emit a raw statistics file for any scan.  When `long_term_scan` is active, emitting the file is strongly recommended.  When drift computation is enabled (as defined by the GUNZ‑DRIFT companion extension), the file **shall** be emitted, regardless of scan mode.
-> 
-> All `.gunzstats` files use a fixed 32‑byte record format.  The file begins with the 4‑byte magic number `0x475A4C02` (little‑endian).  Following the magic, the file consists of a sequence of packed 32‑byte records, one per candidate, in map order.  This is the **only** valid magic number.  A conformant decoder shall reject any `.gunzstats` file whose magic is not `0x475A4C02` with `GUNZ_MALFORMED_BYTECODE`.
-> 
-> **Format** – packed 32‑byte records, one per candidate, in map order:
-> 
-> | Offset | Size | Field | Description |
-> |--------|------|-------|-------------|
-> | 0  | u32 | `block_count` | Number of temporal blocks evaluated. |
-> | 4  | u64 | `sum_block_time` | Sum of block times (base time units). |
-> | 12 | u64 | `sum_block_time_sq` | Sum of squared block times. |
-> | 20 | u16 | `count_adv_lo` | Number of short advances. |
-> | 22 | u16 | `count_adv_hi` | Number of long advances. |
-> | 24 | s16 | `drift` | Intra‑block drift (ticks × 100 per cycle).  Zero if drift is not enabled or `N < 2`. |
-> | 26 | s16 | `peak_drift` | Peak absolute drift observed across the measurement window, with original sign (ticks × 100 per cycle). |
-> | 28 | u32 | `reserved` | Reserved for future use.  Must be written as zero by current encoders.  Decoders shall not validate this field for non‑zero values; it is part of the compressed stream. |
-> 
-> All time values are in the base time unit.  The number of records equals the total number of candidates evaluated.
-> 
-> When drift is not enabled, the `drift` and `peak_drift` fields shall be written as zero.
-
----
-
-#### 2. §4.9 — Compressed Statistics File (`.gunzstatz`)
-
-**Replace the existing §4.9 with:**
-
-> **§4.9 Compressed Statistics File (`.gunzstatz`)**
-> 
-> Optional compressed version of `.gunzstats` using delta encoding with run‑length and LEB128.  The file uses the same 32‑byte record structure as the uncompressed file and the same magic number `0x475A4C02`.
-> 
-> **File structure:**
-> 
-> | Offset | Size | Field |
-> |--------|------|-------|
-> | 0  | u32 | `magic` `0x475A4C02` |
-> | 4  | u32 | `candidate_count` |
-> | 8  | u32 | `anchor_freq_raw` |
-> | 12 | 32 bytes | `anchor_record` (first candidate's statistics, all 32 bytes) |
-> | 44 | … | compressed delta stream |
-> 
-> **Anchor record fields (32 bytes, in order):**
-> 
-> | Offset | Size | Field |
-> |--------|------|-------|
-> | 0  | u32 | `block_count` |
-> | 4  | u64 | `sum_block_time` |
-> | 12 | u64 | `sum_block_time_sq` |
-> | 20 | u16 | `count_adv_lo` |
-> | 22 | u16 | `count_adv_hi` |
-> | 24 | s16 | `drift` |
-> | 26 | s16 | `peak_drift` |
-> | 28 | u32 | `reserved` |
-> 
-> **Compression algorithm:**
-> 
-> For each subsequent candidate (after the anchor), compute signed deltas of the **eight** fields.  The bitmask defines which fields have non‑zero deltas:
-> 
-> | Bit | Field |
-> |-----|-------|
-> | 0 | `block_count` |
-> | 1 | `sum_block_time` |
-> | 2 | `sum_block_time_sq` |
-> | 3 | `count_adv_lo` |
-> | 4 | `count_adv_hi` |
-> | 5 | `drift` |
-> | 6 | `peak_drift` |
-> | 7 | `reserved` |
-> 
-> – If all deltas are zero, emit byte `0x00` followed by the run length encoded as **unsigned LEB128**.  
-> – Otherwise, emit a bitmask byte (bits 0‑7) and, for each set bit, emit the signed delta for that field encoded as **signed LEB128**.
-> 
-> **Decoding algorithm:**
-> 
-> 1. Read the magic.  If not `0x475A4C02`, reject with `GUNZ_MALFORMED_BYTECODE`.
-> 2. Read `candidate_count` and `anchor_freq_raw`.
-> 3. Read the 32‑byte `anchor_record`.  This gives the absolute values of all eight fields for the first candidate.  Store this as the previous record.
-> 4. For each subsequent candidate (2 to `candidate_count`):
->    - Read a byte `mask`.
->    - If `mask == 0x00`: read an unsigned LEB128 run length `R`, replicate the previous record `R` times, and skip to the next candidate.
->    - Otherwise: copy the previous record, and for each bit `b` set in `mask` (0‑7), read a signed LEB128 delta and add it to the corresponding field in the copied record.  Store the updated record as the new previous record.
-> 
-> **LEB128 encoding (normative – Full profile only):**  
-> *(Unchanged from the existing specification.)*
-
----
-
-#### 3. §4.6 — Map Companion Metadata File (`.gunzmeta`)
-
-In the table of mandatory keys, **add** the following row after `long_term_scan`:
-
-> | `drift_enabled` | boolean | (Optional) `true` if the drift metric was computed for this scan.  Absent or `false` otherwise. |
-
----
-
-#### 4. §4.3 — Integrity & Fingerprint
-
-In the paragraph discussing `stats_fingerprint`, **add** the following sentence at the end:
-
-> When the `.gunzstats` or `.gunzstatz` file is present (magic `0x475A4C02`), the fingerprint covers that file, including all eight fields of the 32‑byte records.
-
----
-
-#### 5. §6 — Conformance
-
-In the **Runtime** subsection, **add** the following bullet after the existing `.gunzstats`/`.gunzstatz` item:
-
-> – Support the `.gunzstats` and `.gunzstatz` file formats with magic `0x475A4C02`.  Reject any `.gunzstats` or `.gunzstatz` file with a different magic, returning `GUNZ_MALFORMED_BYTECODE`.  Drift field computation is optional; implementations that do not support drift shall write zero in the `drift` and `peak_drift` fields and set `drift_enabled = false` (or omit the field) in `.gunzmeta`.
-
----
-
-### Summary of Changes
-
-| Section | Change |
-| :--- | :--- |
-| **§4.8** | Replaced entirely.  Fixed 32‑byte records, magic `0x475A4C02`, eight fields including `drift`, `peak_drift`, `reserved`.  `reserved` is not validated.  File header layout explicitly stated. |
-| **§4.9** | Replaced entirely.  Compression algorithm extended to eight fields (bits 0‑7).  Run‑length encoding preserved.  `reserved` is compressed like any other field. |
-| **§4.6** | Added `drift_enabled` metadata field. |
-| **§4.3** | Added fingerprint note covering the new 32‑byte stats format. |
-| **§6** | Added conformance requirement for magic `0x475A4C02`; rejection of any other magic.  Drift support is optional. |
-
----
-
-### Divergence Summary (Explicit)
-
-The following **conflicts** were resolved in favour of the more forward‑compatible approach:
-
-1. **Magic number:** Your patch used `0x475A4C01`; my patch used `0x475A4C02`. **Adopted `0x475A4C02`** to signal a clean break.
-2. **`reserved` field validation:** Your patch required decoders to reject non‑zero `reserved`; my patch allowed it as a compressible field. **Adopted my version** for future extensibility.
-3. **`reserved` in compressed stream:** Your patch skipped it; my patch compressed it as bit 7. **Adopted my version** (the `reserved` field is now part of the compression stream).
-4. **Bitmask bits:** Your patch used bits 0‑6 only; my patch used bits 0‑7. **Adopted my version** (bit 7 is now live).
-
----
-
----
-
-# GUNZ‑DRIFT — Intra‑Block Advance Trend Metric Extension  
-*Draft 0.9b — Companion to GUNZ 3.65.0*
+# GUNZ‑DRIFT 1.0 — Intra‑Block Advance Trend Metric Extension  
+*Companion to GUNZ 3.67.0*
 
 ---
 
 ## 1. Overview
 
-GUNZ‑DRIFT extends the GUNZ 3.65.0 resonance evaluator with a directional **drift** metric that captures the *intra‑block* accumulation of rounding decisions.  Unlike `advance_regularity`, which measures the variance of per‑cycle advances without regard to order, drift measures the **slope** of those advances across the cycles of a single block.
+GUNZ‑DRIFT extends the GUNZ resonance evaluator with a directional **drift** metric that captures the *intra‑block* accumulation of rounding decisions.  Unlike `advance_regularity`, which measures the variance of per‑cycle advances without regard to order, drift measures the **slope** of those advances across the cycles of a single block.
 
 A positive drift means the per‑cycle advance increases over the course of a block (long cycles cluster toward the end).  A negative drift means the advance decreases (long cycles cluster toward the beginning).  A drift of zero indicates that the long and short cycles are uniformly distributed throughout the block.
 
 This metric reveals a dimension of timing behaviour that the existing metrics are blind to — the direction in which rounding decisions accumulate within a block, independent of their magnitude.  It requires no new simulation infrastructure and is computed from data the evaluator already collects.
 
-**Integration philosophy.**  Drift is stored in the extended **`.gunzstats`** companion file, not inside the map entry.  The map entry remains the standard 16‑byte structure defined in GUNZ 3.65.0 §4.2.  No custom map version is required; maps produced with drift enabled are standard GUNZ 3.65.0 maps with `map_version = 0x003E`.  The extension is entirely in the optional statistics companion file.  Tools that require drift must read the companion statistics file; the `.gunzmap` alone does not contain this metric.
+**Integration philosophy.**  Drift is stored in the extended **`.gunzstats`** companion file, not inside the map entry.  The map entry remains the standard 16‑byte structure defined in GUNZ 3.67.0 §4.2.  No custom map version is required; maps produced with drift enabled are standard GUNZ maps with `map_version = 0x0040`.  The extension is entirely in the optional statistics companion file.  Tools that require drift must read the companion statistics file; the `.gunzmap` alone does not contain this metric.
 
 ---
 
@@ -282,6 +103,8 @@ All intermediate computations shall use **128‑bit unsigned arithmetic** where 
 
 The drift metric depends on the effective quantum value used by the evaluator, which is guaranteed to be `≥ 1` after parameter merging (§3.10 of the core specification).
 
+**Jitter‑window scope.** The drift computation is performed for every valid jitter offset `Δ` in the jitter window. For each offset, the cycle time `T_jitter` is computed from the offset frequency `freq_candidate + Δ`, and the block parameters (`N`, `N_hi`) are derived from `T_jitter` exactly as described in §3.11 of the core GUNZ specification. The per‑jitter‑point drift values are then aggregated into the candidate‑level metrics `drift`, `drift_max`, and `drift_min` as defined in §4.
+
 ---
 
 ## 3. Interpretation
@@ -298,20 +121,27 @@ Drift is independent of `advance_regularity`.  Two blocks with identical per‑c
 
 ---
 
-## 4. Aggregation in Long‑Term Mode
+## 4. Aggregation Across Jitter Points and Temporal Blocks
 
-When `long_term_scan` is active, the evaluator simulates multiple consecutive blocks for each candidate.  For each block `j`, let `d_j` be the intra‑block drift computed as above.
+For each candidate frequency, the evaluator computes a per‑block drift value `d_j(Δ)` for every valid jitter offset `Δ` as defined in §2, using the block parameters (`N`, `N_hi`, `T_jitter`) that apply at that offset.
 
-The per‑block drift values `d_j` shall be accumulated in a **128‑bit signed** accumulator.  This guarantees no overflow for all legal parameter combinations.
+**Per‑jitter‑point aggregation (long‑term mode).** When `long_term_scan` is active, the per‑block drift values at a single jitter offset are averaged to obtain the per‑jitter‑point drift `d(Δ)`:
 
-- **Drift (stored):** The arithmetic mean of all `d_j` across the measurement window, rounded half‑to‑even.  The rounding of the mean follows the same signed half‑to‑even convention defined in §2.
-- **Peak drift:** The drift value `d_j` that has the largest absolute magnitude `|d_j|` among all blocks in the measurement window.  The original sign of that `d_j` is preserved in the stored value.  If multiple blocks have the same maximum absolute magnitude, the one with the positive sign is chosen (deterministic tie‑break).
+\[
+d(Δ) = \frac{1}{B} \sum_{j=0}^{B-1} d_j(Δ)
+\]
 
-*(Note: The `peak_drift` field records the drift value with the largest absolute magnitude, preserving its sign.  The positive‑sign tie‑break is deterministic but arbitrary; it does not affect the magnitude of the deviation.  A user should not infer that the worst‑case directional behaviour was always positive.)*
+where `B` is the number of blocks evaluated at that jitter offset. The mean is rounded half‑to‑even using the signed convention of §2. In single‑block mode, `d(Δ) = d_0(Δ)` for the single block.
 
-The peak drift is useful for identifying intermittent directional behaviour that may average to zero but cause transient effects.
+**Per‑candidate aggregation.** The per‑candidate drift values are obtained by aggregating the per‑jitter‑point values `d(Δ)` across all valid jitter points:
 
-In single‑block mode, `drift = d` and `peak_drift = d` for the single block evaluated.
+- `drift` — the arithmetic mean of all `d(Δ)` across all valid jitter points, rounded half‑to‑even (signed). If the jitter window contains only one valid point, `drift` equals `d(0)`.
+- `drift_max` — the maximum value of `d(Δ)` observed over all jitter points (most positive, or least negative if all values are negative).
+- `drift_min` — the minimum value of `d(Δ)` observed over all jitter points (most negative, or least positive if all values are positive).
+
+All summations shall use at least **128‑bit signed** accumulation to prevent overflow. The arithmetic mean of per‑jitter‑point values uses the same signed half‑to‑even rounding convention as the per‑block mean.
+
+Averaging signed drift values across jitter points may result in cancellation when the drift oscillates symmetrically within the window. This is physically meaningful: a candidate whose jitter window straddles a drift reversal genuinely has no net directional bias, and a zero mean accurately reflects that. The `drift_max` and `drift_min` fields preserve the extremes, so the full excursion envelope remains available for analysis.
 
 ---
 
@@ -319,7 +149,11 @@ In single‑block mode, `drift = d` and `peak_drift = d` for the single block ev
 
 ### 5.1 Drift in the Extended `.gunzstats` File
 
-Drift values are stored in the extended `.gunzstats` file defined by GUNZ 3.65.0 §4.8.  The format uses **32‑byte records** with the following layout:
+Drift values are stored in the extended `.gunzstats` file defined by GUNZ 3.67.0 §4.8.  The file begins with a 4‑byte magic number `0x475A4C02` (little‑endian), followed by a 4‑byte little‑endian `candidate_count` giving the total number of records in the file.  This is the **only** valid magic for `.gunzstats` files.  A conformant decoder shall reject any `.gunzstats` file whose magic is not `0x475A4C02` with `GUNZ_MALFORMED_BYTECODE`.
+
+The total file size in bytes is `8 + candidate_count × 32`.
+
+The format uses **32‑byte records** with the following layout:
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
@@ -328,19 +162,20 @@ Drift values are stored in the extended `.gunzstats` file defined by GUNZ 3.65
 | 12 | u64 | `sum_block_time_sq` | Sum of squared block times. |
 | 20 | u16 | `count_adv_lo` | Number of short advances. |
 | 22 | u16 | `count_adv_hi` | Number of long advances. |
-| 24 | s16 | `drift` | Intra‑block drift (ticks × 100 per cycle).  Zero if drift computation is not enabled or `N < 2`. |
-| 26 | s16 | `peak_drift` | Peak absolute drift observed across the measurement window, with original sign (ticks × 100 per cycle). |
-| 28 | u32 | `reserved` | Reserved for future use.  Must be written as zero by current encoders.  Decoders shall not validate this field for non‑zero values; it is part of the compressed stream. |
+| 24 | s16 | `drift` | Intra‑block drift, averaged across the jitter window and measurement window (ticks × 100 per cycle).  Zero if drift is not enabled or `N < 2`. |
+| 26 | s16 | `drift_max` | Most positive (or least negative) drift value observed among all jitter points and blocks (ticks × 100 per cycle). |
+| 28 | s16 | `drift_min` | Most negative (or least positive) drift value observed among all jitter points and blocks (ticks × 100 per cycle). |
+| 30 | u16 | `reserved` | Reserved.  Must be written as zero by current encoders.  Decoders shall ignore this field; it is not part of the compression stream. |
 
 All time values are in the base time unit.  The number of records equals the total number of candidates evaluated.
 
-The first four bytes of the file shall be the magic number `0x475A4C02` (little‑endian).  This is the **only** valid magic for `.gunzstats` files.  A conformant implementation shall reject any `.gunzstats` file with a different magic number, returning `GUNZ_MALFORMED_BYTECODE`.
-
-The `.gunzstats` file is emitted for any scan mode when drift computation is requested, not only when `long_term_scan` is active.  For single‑block scans, the `block_count` field is `1`, and the `drift` and `peak_drift` fields contain the single‑block drift value.
+The `.gunzstats` file is emitted for any scan mode when drift computation is requested, not only when `long_term_scan` is active.  For single‑block scans, the `block_count` field is `1`, and the `drift`, `drift_max`, and `drift_min` fields contain the per‑candidate drift values after aggregation across the jitter window.
 
 ### 5.2 Compressed Statistics File (`.gunzstatz`)
 
-The compressed `.gunzstatz` file uses the same 32‑byte record structure and the same magic number `0x475A4C02`.  The anchor record is 32 bytes, and the delta‑compression bitmask uses bits 0‑7 as follows:
+The compressed `.gunzstatz` file uses the same 32‑byte record structure and a **distinct magic number `0x475A4C03`**.  The file begins with `0x475A4C03` (little‑endian), followed by the `candidate_count`, `anchor_freq_raw`, and the 32‑byte anchor record.  A conformant decoder shall reject any `.gunzstatz` file whose magic is not `0x475A4C03` with `GUNZ_MALFORMED_BYTECODE`.
+
+The delta‑compression bitmask uses bits 0‑7 as follows:
 
 | Bit | Field |
 |-----|-------|
@@ -350,12 +185,10 @@ The compressed `.gunzstatz` file uses the same 32‑byte record structure and th
 | 3 | `count_adv_lo` |
 | 4 | `count_adv_hi` |
 | 5 | `drift` |
-| 6 | `peak_drift` |
-| 7 | `reserved` |
+| 6 | `drift_max` |
+| 7 | `drift_min` |
 
-All eight fields are delta‑compressed.  The `reserved` field is compressed exactly like any other field.  If it is zero and stays zero, it is skipped in the bitmask.  If it changes, its delta is encoded.  There is no validation that the `reserved` field must be zero; it is part of the compressed stream and may be repurposed in future extensions.
-
-The `reserved` field is **not** validated for zero by the decoder.  It is reconstructed from the compressed stream and stored in the record.  This allows future extensions to repurpose the `reserved` field without changing the file format.
+The `reserved` field is **not** delta‑compressed; the decompressor shall set it to zero after reconstructing a record.  (If a future extension repurposes these two bytes, the compression bitmask will be extended accordingly.)
 
 ### 5.3 Metadata
 
@@ -388,18 +221,20 @@ The snowball rolls within a single block.  The sequence of per‑cycle advances 
 A conformant GUNZ‑DRIFT implementation must:
 
 - Compute drift using the exact least‑squares formula defined in §2, with 256‑bit intermediates for `sum_a`, `sum_ia`, `num`, and `den`.
-- Use a 128‑bit signed accumulator for the long‑term mode sum (§4).
+- Use a 128‑bit signed accumulator for the long‑term mode and jitter‑window aggregation (§4).
 - Apply half‑to‑even rounding to the final division, using the signed rounding convention specified in §2.
 - Produce the per‑cycle advance sequence using the placement algorithm of §2.1, with the initial error `E` derived from `rem = (N * T) % quantum` as specified, using the unrounded continuous block time `P = N * T`.
+- For each candidate frequency, compute per‑block drift values at every valid jitter offset, aggregate per‑jitter‑point values in long‑term mode as the arithmetic mean, and then aggregate per‑jitter‑point values across all valid jitter points as the arithmetic mean (`drift`), maximum (`drift_max`), and minimum (`drift_min`), using at least 128‑bit signed accumulation and the signed half‑to‑even rounding convention of §2.
 - Saturate the drift result to a signed 16‑bit integer before storage.
 - Produce bit‑identical drift values for identical inputs.
-- Emit the `.gunzstats` file with magic `0x475A4C02` and 32‑byte records when drift is computed, for any scan mode.
+- Emit the `.gunzstats` file with magic `0x475A4C02` and the 8‑byte header (`magic` + `candidate_count`) followed by 32‑byte records when drift is computed, for any scan mode.
 - Reject any `.gunzstats` file whose magic is not `0x475A4C02` with `GUNZ_MALFORMED_BYTECODE`.
+- Reject any `.gunzstatz` file whose magic is not `0x475A4C03` with `GUNZ_MALFORMED_BYTECODE`.
 - Record `drift_enabled = true` in `.gunzmeta`.
-- Compute peak drift as the drift value with the largest absolute magnitude among blocks, preserving its original sign, with a positive‑sign tie‑break.
-- If producing compressed `.gunzstatz`, use the eight‑field bitmask (bits 0‑7) and reject no reserved bit; the `reserved` field is compressed like any other field.
+- Compute `drift_max` as the maximum drift value across all jitter points and blocks, and `drift_min` as the minimum drift value across all jitter points and blocks (both signed, preserving original sign).
+- If producing compressed `.gunzstatz`, write the magic `0x475A4C03` as the first four bytes.  Reject any `.gunzstatz` file with a different magic.
 
-Support for GUNZ‑DRIFT is **optional** for GUNZ 3.65.0 conformance.  Implementations that do not support the drift extension shall write zero in the `drift` and `peak_drift` fields and set `drift_enabled = false` (or omit the field) in `.gunzmeta`.  The `.gunzstats` file format (magic `0x475A4C02`) is mandatory when statistics are emitted.
+Support for GUNZ‑DRIFT is **optional** for GUNZ 3.67.0 conformance.  Implementations that do not support the drift extension shall write zero in the `drift`, `drift_max`, and `drift_min` fields and set `drift_enabled = false` (or omit the field) in `.gunzmeta`.  The `.gunzstats` file format (magic `0x475A4C02`) is mandatory when statistics are emitted.
 
 ---
 
@@ -410,17 +245,17 @@ Support for GUNZ‑DRIFT is **optional** for GUNZ 3.65.0 conformance.  Impleme
 Consider two frequencies that produce identical `N = 10`, `N_hi = 3`, `d_lo_cont = 5`, `d_hi_cont = 6` (in ticks, before scaling).  Their `jitter` and `advance_regularity` are identical.  However, because `T` differs by a fraction of a quantum, the continuous remainder `rem` differs, producing different initial errors:
 
 - **Case A:** `rem` is small.  `E` is small.  The Bresenham algorithm places long cycles at indices 2, 5, 8.  
-  Drift ≈ +17.3 (positive — long cycles weighted toward the second half).
+  Drift ≈ +17.3.  `drift_max = +17.3`, `drift_min = +17.3` (single‑block mode, single jitter point).
 
 - **Case B:** `rem` is large.  `E` is close to `N-1`.  The Bresenham algorithm places long cycles at indices 0, 3, 6.  
-  Drift ≈ −17.3 (negative — long cycles weighted toward the first half).
+  Drift ≈ −17.3.  `drift_max = −17.3`, `drift_min = −17.3`.
 
-Both cases have `advance_regularity ≈ 458.26` (ticks × 100).  Drift distinguishes them, capturing the directional ordering that variance ignores.
+If these two cases occur at different jitter offsets of the same candidate, the per‑jitter‑point values are `+17.3` and `−17.3`.  The per‑candidate `drift` (arithmetic mean) is zero, indicating no net directional bias, while `drift_max = +17.3` and `drift_min = −17.3` capture the full oscillation envelope.  The velocity `drift_max − drift_min = 34.6` quantifies the total directional swing within the jitter window.
 
 ### 9.2 Zero Drift
 
-When `rem = 0`, the continuous block time is an exact multiple of the quantum.  The initial error is `E = 0`, the Bresenham algorithm produces a perfectly alternating pattern, and drift is zero.  The block has no directional bias.
+When `rem = 0`, the continuous block time is an exact multiple of the quantum.  The initial error is `E = 0`, the Bresenham algorithm produces a perfectly alternating pattern, and drift is zero.  All three fields are zero.
 
 ---
 
-*GUNZ‑DRIFT — Intra‑Block Advance Trend Metric Extension — draft 0.9b*
+*GUNZ‑DRIFT 1.0 — Intra‑Block Advance Trend Metric Extension — complete.*
