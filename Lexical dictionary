@@ -1,5 +1,5 @@
 
-# GUNZ 3.60.0 — Lexical Dictionary for Beginners
+# GUNZ 3.67.0 — Lexical Dictionary for Beginners
 
 *These definitions assume no engineering background. They are not normative—they are here purely to help you read the spec and guides without getting lost in jargon.*
 
@@ -75,7 +75,7 @@ The starting frequency of a scan, in 10⁻⁵ Hz units. All other frequency po
 *See also:* Zone, `freq_delta_start`.
 
 **`freq_delta_start`**  
-The offset (in 10⁻⁵ Hz) from the `base_freq` to the start of a map entry. When sparse maps are used, this field may accumulate the run lengths of previously omitted intervals. In 3.60.0, if the accumulated offset would overflow the signed 16‑bit field, a long‑jump entry is emitted instead.  
+The offset (in 10⁻⁵ Hz) from the `base_freq` to the start of a map entry. When sparse maps are used, this field may accumulate the run lengths of previously omitted intervals. If the accumulated offset would overflow the signed 16‑bit field, a long‑jump entry is emitted instead.  
 *See also:* Map Entry, Sparse Map.
 
 **Long‑jump Entry**  
@@ -94,7 +94,7 @@ The fundamental unit of a GUNZ resonance map. Each entry describes a consecutive
 *See also:* Run‑length, Long‑jump Entry.
 
 **Map Version (`map_version`)**  
-A number identifying which revision of the map format is being used. GUNZ 3.60.0 maps use `0x0039`. Decoders **must reject** maps with an unknown version—this prevents accidental misinterpretation of future formats.  
+A number identifying which revision of the map format is being used. GUNZ 3.67.0 maps use `0x0040`. Decoders **must reject** maps with an unknown version—this prevents accidental misinterpretation of future formats.  
 *See also:* Conformance.
 
 **Run‑length**  
@@ -102,7 +102,7 @@ The number of consecutive frequency steps that share identical metrics. Map entr
 *See also:* Map Entry, Long‑jump Entry.
 
 **Sparse Map**  
-A map where regions with zero metrics are omitted to save space. The offsets of the next entry are adjusted accordingly. When multiple consecutive intervals are omitted, their lengths accumulate into the `freq_delta_start` of the next non‑omitted entry. **Decoders must process entries sequentially** to reconstruct absolute frequencies; random access requires building an index first. If the accumulated offset would exceed the maximum signed 16‑bit value, a long‑jump entry is emitted instead.  
+A map where regions with zero metrics and zero stability width are omitted to save space. The offsets of the next entry are adjusted accordingly. When multiple consecutive intervals are omitted, their lengths accumulate into the `freq_delta_start` of the next non‑omitted entry. **Decoders must process entries sequentially** to reconstruct absolute frequencies; random access requires building an index first. If the accumulated offset would exceed the maximum signed 16‑bit value, a long‑jump entry is emitted instead.  
 *See also:* Map Entry, `freq_delta_start`.
 
 **Stable Region / Stability Region**  
@@ -215,7 +215,7 @@ Maximum number of blocks to simulate **per candidate** (default ≥ 65 536). I
 *See also:* Long‑term Scan, `T_min`.
 
 **`total_max_scan_iterations`**  
-Global iteration limit across **all zones** in a plan (default ≥ 67 108 864). Prevents denial‑of‑service via bytecode that expands into enormous workloads.  
+Global iteration limit across **all zones** in a plan (default ≥ 67 108 864). Enforced by a single‑threaded pre‑pass before parallel scanning begins. Prevents denial‑of‑service via bytecode that expands into enormous workloads.  
 *See also:* Plan Construction, `max_scan_iterations`.
 
 **`window_duration`**  
@@ -227,11 +227,11 @@ The total measurement window (in base time units) for long‑term scans. The eva
 ## Bytecode & Orchestration
 
 **Bytecode / ISA / Opcode**  
-The low‑level instruction language that GUNZ uses to describe a scan. The **ISA** (Instruction Set Architecture) is the complete set of instructions. An **opcode** is the part of an instruction that specifies which operation to perform. You don’t need to write bytecode yourself; an AI, a library, or a tool can generate it. If you’re using the Minimal Profile, you can ignore these entirely. In 3.60.0, the bytecode version is fixed to `0x0003003C`; exact version matching is required.  
+The low‑level instruction language that GUNZ uses to describe a scan. The **ISA** (Instruction Set Architecture) is the complete set of instructions. An **opcode** is the part of an instruction that specifies which operation to perform. You don’t need to write bytecode yourself; an AI, a library, or a tool can generate it. If you’re using the Minimal Profile, you can ignore these entirely. In 3.67.0, the bytecode version is fixed to `0x00030043`; exact version matching is required.  
 *See also:* Minimal Profile, Lane.
 
 **Fuel**  
-A concept used only in the optional Dynamic Lane. Every instruction costs a little fuel; when fuel runs out, the bytecode interpreter stops. This prevents a program from looping forever. The canonical fuel table is embedded in every plan.  
+A concept used only in the Dynamic Lane (and in Minimal‑profile implementations that support the Dynamic Lane). Every instruction costs a little fuel; when fuel runs out, the bytecode interpreter stops. This prevents a program from looping forever. The canonical fuel table is embedded in every plan.  
 *See also:* Dynamic Lane.
 
 **Lane (Static Lane / Dynamic Lane)**  
@@ -263,11 +263,11 @@ A modern, high‑speed elliptic‑curve digital signature algorithm. Signatures 
 *See also:* Attestation, Fingerprint.
 
 **Fingerprint (XXH3‑128, XXH3‑64)**  
-A unique, short digital fingerprint of a map or file. Like a human fingerprint, it identifies the exact content. GUNZ uses XXH3‑64 for quick integrity checks and XXH3‑128 for global deduplication and map identity. XXH3 is extremely fast and produces identical results on all platforms. The fingerprint is computed over the header fields in their exact byte order, including `step_freq` (bytes 10‑11) and the 4‑byte extension when `step_freq_overflow` is set.  
+A unique, short digital fingerprint of a map or file. Like a human fingerprint, it identifies the exact content. GUNZ uses XXH3‑64 for quick integrity checks and XXH3‑128 for global deduplication and map identity. XXH3 is extremely fast and produces identical results on all platforms. The fingerprint is computed over the header fields in their exact byte order, including `step_freq` (bytes 10‑11), `step_freq_overflow` (byte 31), and the 4‑byte extension when `step_freq_overflow` is set.  
 *See also:* Deduplicate, Attestation.
 
 **Flags**  
-Bit‑sized on/off switches in the header or map entries that control features (e.g., `FLAG_AVOID`, `FLAG_SKIPPED`, `sparse_map`). They let the same file format carry different types of information without changing the structure. In 3.60.0, reserved flag bits (3‑7) must be zero; decoders reject maps with non‑zero reserved bits.  
+Bit‑sized on/off switches in the header or map entries that control features (e.g., `FLAG_AVOID`, `FLAG_SKIPPED`, `sparse_map`). They let the same file format carry different types of information without changing the structure. Reserved flag bits (3‑7) must be zero; decoders reject maps with non‑zero reserved bits.  
 *See also:* Map Entry, Long‑jump Entry.
 
 **Sandboxing**  
@@ -319,7 +319,7 @@ The ability to treat a completed scan as a save point. Using `session_id` and fi
 *See also:* Hibernation, Metadata.
 
 **Plateau‑jump Optimisation**  
-An implementation technique that skips large regions where the entire jitter window remains within a constant‑score interval (all Phase‑1 metrics invariant). Allowed as long as the final map is bit‑identical to a full scan. It does not interfere with stability width computation.  
+An implementation technique that skips large regions where the entire jitter window remains within a constant‑score interval—meaning all map‑entry fields (block‑time inaccuracy, jitter, advance regularity, peak advance regularity, stability width, and flags) are invariant across the window. Allowed as long as the final map is bit‑identical to a full scan. It does not interfere with stability width computation.  
 *See also:* Stability Width.
 
 **`reference_source`**  
@@ -402,4 +402,4 @@ A family of very fast, non‑cryptographic hash functions. GUNZ uses XXH3‑64 f
 
 ---
 
-*If a term is missing, check the full GUNZ 3.60.0 specification or the companion philosophy document. This lexicon is a living helper, not a normative standard.*
+*If a term is missing, check the full GUNZ 3.67.0 specification or the companion philosophy document. This lexicon is a living helper, not a normative standard.*
