@@ -1,27 +1,31 @@
-# GUNZ‑ORACLE — Constraint‑Query Companion Specification  
-*Draft 0.5 — Companion to GUNZ 3.60.0*
+**GUNZ‑ORACLE — Constraint‑Query Companion Specification**  
+*Draft 0.6.1 — Companion to GUNZ 3.67.0*
 
 ---
 
-## Changes from 0.4
+## Changes from 0.5
 
-- **`best_score` widened to `u64`** to match the core evaluator’s 64‑bit saturated score.
-- **Interval record size increased from 20 to 24 bytes.**
-- **Critical‑point enumeration (§5.1) now includes explicit `N_hi` boundary formulas** for each rounding mode.
-- **Jitter‑window expansion (§5.2) now includes clamping** to `[freq_low, freq_high]`.
-- **Opcode reservation clarified** – opcode `0x0D` is reserved for this companion; core GUNZ 3.60.0 implementations shall reject it with `GUNZ_MALFORMED_BYTECODE` unless they support ORACLE.
-- **Error handling added** – `freq_low ≥ freq_high` and invalid `query_class` combinations are now explicitly rejected.
-- **Empty‑result checksum** explicitly stated as XXH3‑64 of an empty byte sequence.
-- **Expand for jitter window**
+- **Integration with GUNZ 3.67.0:** Opcode `0x0D` is formally reserved in the GUNZ opcode table; the execution model is defined in this companion specification.
+- **`PURE_CALL` non‑invocation clarified:** The captured callback is not invoked during an ORACLE query.
+- **Thread safety note added:** ORACLE modifies no shared VM state.
+- **CQR endianness explicitly stated:** All multi‑byte integers are little‑endian.
+- **CQR‑to‑map conversion mentioned:** Informative note on trivial conversion.
+- **Deduplication fingerprint added:** CQR files may carry an XXH3‑128 fingerprint.
+- **Adaptive fallback guidance:** Implementation‑defined threshold, with 10 % of dense‑scan candidate count as a conservative default.
+- **Error handling tightened:** `freq_low ≥ freq_high`, `freq_low < 1`, and invalid `query_class` or `flags` rejected with `GUNZ_MALFORMED_BYTECODE`.
+- **Version bump** to reflect companion maturity.
+
 ---
 
 ## 1. Overview
 
-GUNZ‑ORACLE extends the GUNZ resonance evaluator with a constraint‑query mode.  
+GUNZ‑ORACLE extends the GUNZ 3.67.0 resonance evaluator with a constraint‑query mode.  
 Instead of scanning a zone and producing a full stability map, the oracle accepts a set of constraints and returns the exact frequency intervals that satisfy them.
 
 The oracle is built on the same deterministic integer arithmetic as the core evaluator.  
 Its results are **bit‑identical across conformant implementations**.
+
+Support for GUNZ‑ORACLE is **optional**.  A conformant GUNZ 3.67.0 implementation that does not implement the oracle shall reject the `ORACLE` opcode with `GUNZ_MALFORMED_BYTECODE`.  The opcode `0x0D` is reserved for this companion specification; implementations that support the oracle shall implement its semantics as defined in this document.
 
 ---
 
@@ -40,7 +44,7 @@ A query that mixes per‑candidate and stability‑width constraints **must** us
 
 ## 3. The `ORACLE` Opcode
 
-`ORACLE` is a static‑lane opcode assigned the number `0x0D`.  This opcode is reserved by GUNZ 3.60.0 for use by this companion specification.  Core GUNZ implementations that do not support ORACLE shall reject the opcode with `GUNZ_MALFORMED_BYTECODE`.
+`ORACLE` is a static‑lane opcode assigned the number `0x0D`.  This opcode is reserved in GUNZ 3.67.0 (§2.3.1) for use by this companion specification.  Core implementations that do not support ORACLE shall reject the opcode with `GUNZ_MALFORMED_BYTECODE`.
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
@@ -57,9 +61,11 @@ A query that mixes per‑candidate and stability‑width constraints **must** us
 Total instruction size: 20 bytes.  
 The instruction is permitted only in static‑lane programs.  A dynamic‑lane program containing `ORACLE` shall be rejected with `GUNZ_MALFORMED_BYTECODE`.
 
-The oracle uses the current system state (multiplier, rounding mode, delta pair, effective `step_freq`, and any pending `PURE_CALL`) captured from the VM at the moment the `ORACLE` instruction is executed, exactly as for a `ZONE`.
+The oracle uses the current system state (multiplier, rounding mode, delta pair, effective `step_freq`, and any pending `PURE_CALL` specification) captured from the VM at the moment the `ORACLE` instruction is executed, exactly as for a `ZONE`.  However, the captured `PURE_CALL` callback is **not** invoked during the query; it is retained for subsequent `ZONE` instructions only.
 
 **Independence from ZONE/SKIP_ZONE.**  An `ORACLE` instruction does not consume a zone slot; it is an independent query and does not affect the zone list or the deferred‑operation queue.  The result of an `ORACLE` query is never automatically exported or merged with other maps; it must be explicitly written via a separate `EXPORT`‑like mechanism if persistence is desired.
+
+**Thread safety.**  `ORACLE` is a pure function of its inputs and the captured system state.  It modifies no shared VM state and is safe to execute concurrently with other operations that do not mutate the parameters on which the query depends.
 
 ---
 
@@ -67,6 +73,8 @@ The oracle uses the current system state (multiplier, rounding mode, delta pair,
 
 The oracle produces a **Constraint Query Result (CQR)** file with the extension `.gunzoracle`.  
 The file consists of a 24‑byte header followed by a packed sequence of 24‑byte interval records.
+
+All multi‑byte integers are encoded in **little‑endian** byte order, consistent with GUNZ 3.67.0.
 
 ### 4.1 CQR Header
 
@@ -98,7 +106,9 @@ Total record size: 24 bytes.
 
 Intervals are contiguous.  If no interval satisfies the constraints, the file contains zero records and the `xxh3_64` checksum is computed over an empty byte sequence.  The `interval_count` field must be `0` in that case.
 
-CQR files are cacheable and may be deduplicated using the same fingerprinting mechanisms defined in GUNZ 3.60.0 §4.3, with a dedicated magic number for the CQR format.
+CQR files are cacheable and may be deduplicated using an XXH3‑128 fingerprint computed over the serialised header (excluding the checksum field) and the interval records, in the same manner as GUNZ map fingerprints (§4.3).  Two CQR files with identical fingerprints are guaranteed to contain identical results.
+
+*(Informative)* A CQR file may be trivially converted to a GUNZ resonance map by emitting each interval as a normal map entry with the best‑case metrics stored in the entry fields.  The resulting map is a valid, deterministic subset of the full dense scan.  This conversion is not part of the ORACLE specification and is left to implementation‑defined tooling.
 
 ---
 
@@ -131,25 +141,22 @@ The set of critical frequencies in `[freq_low, freq_high]` is obtained as follow
 
 2. **For each constant‑`N` sub‑interval:** using the rounding‑mode‑dependent formulas from §5.1, enumerate the `N_hi` crossing points that fall within that sub‑interval.  Use the value of `N` that applies to that sub‑interval.  Add these points to the partition set.
 
-**3. Expand for jitter window (complete).**  
-For every critical frequency `f_c` obtained in steps 1 and 2, and for every jitter offset `Δ` in the set  
+3. **Expand for jitter window.**  
+   For every critical frequency `f_c` obtained in steps 1 and 2, and for every jitter offset `Δ` in the set  
 
-`Δ ∈ { -R, -R+1000, -R+2000, …, +R }`,  
+   `Δ ∈ { -R, -R+1000, -R+2000, …, +R }`,  
 
-compute  
+   compute  
 
-`f_candidate = f_c + Δ`.  
+   `f_candidate = f_c + Δ`.  
 
-If `freq_low ≤ f_candidate ≤ freq_high`, add `f_candidate` to the list.
+   If `freq_low ≤ f_candidate ≤ freq_high`, add `f_candidate` to the list.
 
-*Rationale:* The score of a candidate frequency `f` depends on the metrics evaluated at `f + Δ` for all jitter offsets.  A change in score can occur whenever **any** `f + Δ` crosses a critical point, i.e. at `f = f_c − Δ`.  By including every `f_c + Δ` (clamped to the query range) in the partition set, we guarantee that within any resulting sub‑interval `[f_a, f_b]` the set of critical points that fall inside the jitter window of a candidate is invariant.  Consequently the score is truly constant across the sub‑interval, and the midpoint evaluation is valid.
-
-*Performance note:* This expansion multiplies the number of partition points by the number of jitter offsets (typically 21).  For coarse `time_unit` the total point count remains far smaller than the number of dense‑scan candidates, so the speed advantage is preserved.  The adaptive fallback (§5.3) already provides a mechanism to switch to a dense scan when the point count becomes excessive for fine `time_unit`.
-
+   *Rationale:* The score of a candidate frequency `f` depends on the metrics evaluated at `f + Δ` for all jitter offsets.  A change in score can occur whenever **any** `f + Δ` crosses a critical point, i.e. at `f = f_c − Δ`.  By including every `f_c + Δ` (clamped to the query range) in the partition set, we guarantee that within any resulting sub‑interval `[f_a, f_b]` the set of critical points that fall inside the jitter window of a candidate is invariant.  Consequently the score is truly constant across the sub‑interval, and the midpoint evaluation is valid.
 
 4. **Sort** the combined list, add `freq_low` and `freq_high`, and remove duplicates.
 
-5. **Partition:** The sorted list defines sub‑intervals `[f_a, f_b]`.  For each, choose the midpoint `f_mid = (f_a + f_b) / 2` (integer division, truncating toward zero).  **The addition `f_a + f_b` shall be performed using 64‑bit unsigned arithmetic to prevent overflow.**  *(Informative: the theoretical minimum width is 33 bits, but 64‑bit arithmetic is the universal safe harbour for implementers.)*
+5. **Partition:** The sorted list defines sub‑intervals `[f_a, f_b]`.  For each, choose the midpoint `f_mid = (f_a + f_b) / 2` (integer division, truncating toward zero).  **The addition `f_a + f_b` shall be performed using 64‑bit unsigned arithmetic to prevent overflow.**
 
 6. **Evaluate:** Run the full single‑candidate evaluator (§3.11 Phase 1) at `f_mid`.  The jitter window of `f_mid` is entirely contained within `[f_a, f_b]` by construction, so the midpoint metrics are valid for the whole sub‑interval.
 
@@ -161,7 +168,7 @@ If `freq_low ≤ f_candidate ≤ freq_high`, add `f_candidate` to the list.
 
 The number of critical points is proportional to the number of `d_lo_cont` intervals plus the number of `N_hi` integer‑crossings.  For coarse `time_unit` (≤ 6), the critical‑point count is far smaller than the number of dense‑scan candidates, yielding significant speedup.
 
-For fine `time_unit` (≥ 9), the number of `N_hi` crossings within a constant‑`N` interval can approach the number of dense‑scan candidates.  Implementations **may** estimate the total number of critical points before enumeration and, if the estimate exceeds a reasonable fraction of the dense‑scan candidate count, switch to the full dense‑scan algorithm (§6) for that query.  This preserves correctness and avoids pathological performance.  The choice of threshold is implementation‑defined; the output must be bit‑identical to the dense‑scan result regardless of the path taken.
+For fine `time_unit` (≥ 9), the number of `N_hi` crossings within a constant‑`N` interval can approach the number of dense‑scan candidates.  Implementations **may** estimate the total number of critical points before enumeration and, if the estimate exceeds a reasonable fraction of the dense‑scan candidate count, switch to the full dense‑scan algorithm (§6) for that query.  A conservative default threshold is **10 %** of the dense‑scan candidate count.  Implementations may document a different threshold; the output must be bit‑identical to the dense‑scan result regardless of the path taken.
 
 ---
 
@@ -193,14 +200,14 @@ Conformant implementations **may** offer an API that invokes the oracle with the
 
 A conformant GUNZ‑ORACLE implementation must:
 
-- Recognise the `ORACLE` opcode in static‑lane programs and reject it if `query_class` is not `0` or `1`, if `flags` is non‑zero, or if `freq_low ≥ freq_high`.
-- Enumerate critical points exactly as defined in §5.1–§5.2, including `d_lo_cont` boundaries, rounding‑mode‑aware `N_hi` crossings (per constant‑`N` interval), and jitter‑window expansion. The jitter‑window expansion **must** include all jitter offsets as specified in §5.2 step 3; the previous behaviour (extremes only) is non‑conformant and will produce incorrect results.
+- Recognise the `ORACLE` opcode in static‑lane programs and reject it if `query_class` is not `0` or `1`, if `flags` is non‑zero, or if `freq_low ≥ freq_high` or `freq_low < 1`.
+- Enumerate critical points exactly as defined in §5.1–§5.2, including `d_lo_cont` boundaries, rounding‑mode‑aware `N_hi` crossings (per constant‑`N` interval), and jitter‑window expansion.
 - Use 64‑bit arithmetic for the midpoint addition in §5.2 step 5.
 - Produce bit‑identical CQR files for identical inputs.
 - Include a valid `xxh3_64` checksum in the CQR header.
 - Return `GUNZ_MALFORMED_BYTECODE` if `ORACLE` appears in a dynamic‑lane program or if the opcode’s `flags` byte is non‑zero.
 
-Support for `ORACLE` is **optional** for GUNZ 3.60.0 conformance.  Implementations that do not support the oracle shall reject the opcode with `GUNZ_MALFORMED_BYTECODE`.
+Support for `ORACLE` is **optional** for GUNZ 3.67.0 conformance.  Implementations that do not support the oracle shall reject the opcode with `GUNZ_MALFORMED_BYTECODE`.
 
 ---
 
@@ -237,4 +244,4 @@ ORACLE  0,              ; query_class = 0 (per‑candidate only)
 
 ---
 
-*GUNZ‑ORACLE — Companion to GUNZ 3.60.0 — draft 0.5*
+*GUNZ‑ORACLE — Companion to GUNZ 3.67.0 — draft 0.6.1*
