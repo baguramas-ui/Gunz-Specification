@@ -1,404 +1,333 @@
-# GUNZ 3.60.0 — Lexical Dictionary for Beginners
+# GUNZ 3.67.0 — Performance Implementation Guide (Informative)
 
-*These definitions assume no engineering background. They are not normative—they are here purely to help you read the spec and guides without getting lost in jargon.*
-
----
-
-## Quick Start: 10 Terms Every Beginner Should Know
-
-| Term | One‑Line Meaning |
-|------|------------------|
-| **Zone** | A frequency range you want to scan (e.g., 30 Hz to 60 Hz). |
-| **Block Time** | The total time a process takes to complete one full cycle. |
-| **Jitter** | How much the block time wobbles when you nudge the frequency slightly. |
-| **Advance Regularity** | How consistent the per‑cycle timing is inside a block. |
-| **Stability Width** | The width of the frequency range where the system stays stable. |
-| **Reference Block Time** | The ideal block time you expect—the “truth anchor.” |
-| **Resonance** | Alignment between the model and reality (low jitter, stable). |
-| **Map Entry** | A 16‑byte record that describes one region of the resonance map. |
-| **Deterministic** | Same input → same output, always, on any machine. |
-| **Quantum** | The duration of one clock tick (nothing to do with quantum physics). |
+*How to build a high‑performance, conformant GUNZ dense scanner — safely and deterministically.*
 
 ---
 
-## Core Timing Concepts
+## 1. Why performance matters
 
-**Advance (`adv_lo` / `adv_hi`)**  
-The number of clock ticks contributed by a single cycle. There are *short* cycles (`adv_lo`) and *long* cycles (`adv_hi`). The advance depends on the cycle time, the clock quantum, and the multiplier.  
-*See also:* `N`, `N_hi`, `N_lo`, Cycle Time.
+A typical AI‑driven tuning session may evaluate millions of frequency candidates across multiple zones and time‑unit scales. The core evaluator is the hot path; every microsecond saved there translates directly into faster feedback loops, lower energy consumption, and more responsive autonomous systems.
 
-**Advance Regularity**  
-A measure of how consistent the per‑cycle advance values are across a block. High advance regularity means the cycles contribute nearly identical advances; low advance regularity means they vary. This variation is not inherently detrimental—it may reflect the system’s operating point or a trade‑off between speed and stability. Stored in ticks × 100, saturated to 65535.  
-*See also:* Advance, `advance_regularity_weight`, Jitter.
-
-**Block Time**  
-The total duration of one complete cycle of the target process, measured from the start of the first tick to the end of the final tick (including any hold or separation cycles). The scanner compares this to the `reference_block_time` to compute `block_time_inaccuracy` (the absolute difference).  
-*See also:* Reference Block Time, `block_time_inaccuracy`.
-
-**Cycle Time (`T`)**  
-`T = 10^(time_unit + 5) / freq_candidate`. The time per frequency step, expressed in the base time unit. This is the foundation of all timing computations.  
-*See also:* Time Unit, Base Frequency.
-
-**Hold Cycles / Separation Cycles**  
-Optional extra cycles inserted after a block reaches its target. `hold_cycles` simulates a brief pause before the next action; `sep_cycles` simulates a mandatory gap between blocks.  
-*See also:* Block Time.
-
-**`N`, `N_hi`, `N_lo` (Cycle Counts)**  
-Inside a single block, `N` is the **total number of cycles** needed to reach `target_ticks`. `N_hi` is the count of *long* cycles (using `adv_hi`), and `N_lo` is the count of *short* cycles (using `adv_lo`).  
-`N = N_lo + N_hi`.  
-**Critical invariant:** `N_hi` must be in `[0, N]`; otherwise the candidate is invalid and gets `FLAG_AVOID`.  
-*See also:* Advance, Target Ticks, `d_lo_cont`, `d_hi_cont`.
-
-**Quantum**  
-The duration of one clock tick, expressed in the base time unit (e.g., nanoseconds). **This has nothing to do with quantum mechanics or quantum computing.** It simply means “the smallest time step the system can measure.”  
-*See also:* Time Unit.
-
-**Reference Block Time**  
-The ideal block time you expect the system to achieve. The scanner compares every candidate frequency against this value to calculate `block_time_inaccuracy`. This is the “truth anchor” for a timing scan.  
-*See also:* Block Time, Truth Anchor, Calibrated Reference.
-
-**Target Ticks (`target_ticks`)**  
-The finish line. The number of clock ticks that the system must accumulate to complete one full block. The evaluator counts advances until the total tick sum reaches or exceeds this number.  
-*See also:* Advance, `N`.
-
-**Time Unit (`time_unit`)**  
-A single number that tells GUNZ what base time scale to use. `0` = seconds, `3` = milliseconds, `6` = microseconds, `9` = nanoseconds, `12` = picoseconds. All timing values in the header and evaluator are expressed in that unit. **Normative maximum:** `12`.  
-*See also:* Quantum, Cycle Time.
+The techniques described in this guide can accelerate the dense scanner by **10–500×** while remaining **bit‑identical** to a naïve implementation. No approximations, no guesswork — only intelligent exploitation of the evaluator’s deterministic structure.
 
 ---
 
-## Frequency & Mapping
+## 2. Fundamental rule
 
-**Base Frequency (`base_freq`)**  
-The starting frequency of a scan, in 10⁻⁵ Hz units. All other frequency positions in the map are stored as offsets from this base.  
-*See also:* Zone, `freq_delta_start`.
-
-**`freq_delta_start`**  
-The offset (in 10⁻⁵ Hz) from the `base_freq` to the start of a map entry. When sparse maps are used, this field may accumulate the run lengths of previously omitted intervals. In 3.60.0, if the accumulated offset would overflow the signed 16‑bit field, a long‑jump entry is emitted instead.  
-*See also:* Map Entry, Sparse Map.
-
-**Long‑jump Entry**  
-A special marker in the map that says “skip a very large gap here.” Used for gaps larger than ±0.32767 Hz. Identified solely by the sentinel combination `run_length == 0` and `block_time_inaccuracy == 0`. The gap size is stored in bytes 8‑15 as a little‑endian `s64`; **no individual field within that range** (jitter, flags, advance regularity, etc.) is interpreted separately.  
-*See also:* Map Entry, Sentinel, `SKIP_ZONE`.
-
-**Map Entry (16‑byte Entry)**  
-The fundamental unit of a GUNZ resonance map. Each entry describes a consecutive frequency range and records:
-- `block_time_inaccuracy` (absolute difference from reference)
-- `jitter` (block‑time variation)
-- `advance_regularity` (per‑cycle consistency)
-- `peak_advance_regularity` (worst‑case per‑cycle consistency)
-- `stability_width` (frequency range of stability)
-- `flags` (detrimental, skipped, saturated, etc.)
-
-*See also:* Run‑length, Long‑jump Entry.
-
-**Map Version (`map_version`)**  
-A number identifying which revision of the map format is being used. GUNZ 3.60.0 maps use `0x0039`. Decoders **must reject** maps with an unknown version—this prevents accidental misinterpretation of future formats.  
-*See also:* Conformance.
-
-**Run‑length**  
-The number of consecutive frequency steps that share identical metrics. Map entries merge these steps into a single `run_length` field (a `u16`, 0–65535). If a run exceeds 65535 steps, the scanner splits it into multiple entries; the first keeps its original `freq_delta_start`, and the subsequent piece(s) have `freq_delta_start = 0`.  
-*See also:* Map Entry, Long‑jump Entry.
-
-**Sparse Map**  
-A map where regions with zero metrics are omitted to save space. The offsets of the next entry are adjusted accordingly. When multiple consecutive intervals are omitted, their lengths accumulate into the `freq_delta_start` of the next non‑omitted entry. **Decoders must process entries sequentially** to reconstruct absolute frequencies; random access requires building an index first. If the accumulated offset would exceed the maximum signed 16‑bit value, a long‑jump entry is emitted instead.  
-*See also:* Map Entry, `freq_delta_start`.
-
-**Stable Region / Stability Region**  
-Imagine two towering mountains of jitter and chaos. A human sees the dramatic peaks; the scanner sees the quiet, flat ground between them. That flat ground is the stable region—the safe frequency range where the system hums smoothly. Technically, it’s the largest interval where the score stays within a tiny tolerance of the best point.  
-*See also:* Stability Width, Resonance.
-
-**Stability Width**  
-The size (in 0.0001 Hz units) of the stable region around a sweet spot. A wide stability width means the system stays robust even if the actual frequency drifts slightly. Stored as a `u16`; the maximum representable value is 6.5535 Hz. If the true width exceeds this, the `STAB_SATURATED` flag is set.  
-*See also:* Stable Region, Flags.
-
-**`step_freq`**  
-The dense‑scan step size, in 10⁻⁵ Hz units, stored in the map header (bytes 10‑11).  
-- `0` → default step size of **1** (10⁻⁵ Hz).  
-- `1‑65535` → exact step size (when the `step_freq_overflow` flag is 0).  
-- When the `step_freq_overflow` flag (byte 31) is **1**, the u16 field is written as `0` and ignored; a 4‑byte little‑endian `u32` extension immediately after the header gives the full 32‑bit step size.  No companion file is needed for decoding.
-
-**Zone**  
-A specific, continuous range of frequencies you want to scan (e.g., from 30.00000 Hz to 60.00000 Hz). The bytecode `ZONE` instruction defines these boundaries. GUNZ evaluates every frequency step inside the zone. Zones may start as low as `freq_low = 1` (0.00001 Hz); the jitter window automatically skips any invalid points. **All zones in a program—including `SKIP_ZONE` regions—must be strictly disjoint: when sorted by `freq_low`, each zone must satisfy `freq_low_next ≥ freq_high_prev + step_freq`.**  
-*See also:* Base Frequency, `step_freq`.
+> **Any optimisation that changes a single bit of the output map is non‑conformant.**  
+> The GUNZ resonance evaluator is a pure function. Its output is fully determined by the input parameters and the dense‑scan frequency grid. The goal is to compute that exact output with less work, not to compute something “close enough.”
 
 ---
 
-## Jitter & Regularity Metrics
+## 3. What’s changed in 3.67.0 — impact on performance
 
-**Jitter (Timing Jitter)**  
-How much the block time wobbles when you nudge the frequency very slightly (±0.1 Hz). Low jitter = stable neighbourhood; high jitter = sensitive and unpredictable. Measured as a population standard deviation of block times across the jitter window, expressed in the base time unit (stored as a `u8`, saturated at 255).  
-*See also:* Jitter Window, Jitter Weight, Advance Regularity.
+The 3.67.0 specification introduces several refinements over the 3.35.0 baseline. Here are the changes most relevant to performance‑oriented implementers:
 
-**Jitter Weight**  
-A configurable multiplier (default 4) that controls how severely the scanner penalises timing jitter. Default is calibrated for real‑time systems where even sub‑millisecond jitter can cause a missed input or deadline.  
-**In the map header, the stored value is always 1‑255** (writers normalize any library‑profile value of 0 to the default 4 before emission; decoders reject a value of 0).  
-**In the library profile, a value of 0 is permitted as a shorthand for “use default 4,”** resolved at plan‑construction time.  
-*See also:* Jitter, Score.
-
-**Jitter Window**  
-The set of frequency points around each candidate used to calculate jitter. Default: 21 points (±0.1 Hz at 10⁻⁵ Hz resolution). Configurable via `jitter_window_radius`. The actual radius in 10⁻⁵ Hz units is `stored_value × 1000` (or 10 000 if the stored value is 0). The window automatically skips any points where `freq_candidate + Δ ≤ 0`, which is why zones can now start as low as `freq = 1`.  
-*See also:* Jitter, `jitter_window_radius`.
-
-**Advance Regularity**  
-A measure of how consistent the per‑cycle advance values are across a block. High advance regularity means the cycles contribute nearly identical advances; low advance regularity means they vary. Stored in **ticks × 100** (not base time units), saturated to 65535.  
-This metric is **neutral**—it is not inherently good or bad. Low advance regularity may be the cost of speed, while high advance regularity may indicate stability. The weight applied to it (`advance_regularity_weight`) lets the user decide how much it matters for their application.  
-*See also:* Advance, `advance_regularity_weight`, Peak Advance Regularity.
-
-**Advance Regularity Weight**  
-A configurable multiplier (default 1) that controls how severely the scanner penalises low advance regularity (per‑cycle variation). A weight of 1 is neutral. Higher weights penalise internal stutter more heavily.  
-**In the map header, the stored value is always 1‑255** (writers normalize any library‑profile value of 0 to the default 1 before emission; decoders reject a value of 0).  
-**In the library profile, a value of 0 is permitted as a shorthand for “use default 1,”** resolved at plan‑construction time.  
-*See also:* Advance Regularity, Score.
-
-**Peak Advance Regularity**  
-The **worst‑case** advance regularity among all points in the jitter window. Even if the average looks okay, a low peak (high variation) means the system might stutter internally at specific moments. Same units as advance regularity (ticks × 100).  
-*See also:* Advance Regularity, Jitter Window.
+| Change | Impact |
+|--------|--------|
+| **`step_freq_overflow` replaces sentinel `0xFFFF`** | Byte 31 of the map header is now a dedicated overflow flag. When set, a 4‑byte `u32` extension follows the header with the full step size. Maps are fully self‑describing without an external `.gunzmeta` file. The old `0xFFFF` sentinel is removed. |
+| **`advance_regularity_weight` and `jitter_weight` in map header** | Now mandatory fields (bytes 8‑9). Always stored as resolved effective weights in 1‑255. Decoders must reject maps with zero weights. No performance impact. |
+| **`stability_mapping_flag` required** | Byte 15 must be `1`. Decoders reject other values. No performance impact. |
+| **`long_term_scan` in map header** | Byte 30 is the sole authoritative source for long‑term scan mode. No per‑entry flag exists. |
+| **`reference_source = 3` retained** | For maps produced without scanning (`reference_block_time = 0`). |
+| **Drift extension now 32‑byte records** | `.gunzstats` uses 32‑byte records with magic `0x475A4C02` (raw) and `0x475A4C03` (compressed). Drift fields at offsets 24‑28. |
+| **`map_version = 0x0040`** | All 3.67.x maps carry this version. Bytecode version is `0x00030043`. |
+| **Jitter‑window scope for drift** | Drift is now computed at every valid jitter offset and aggregated into per‑candidate `drift`, `drift_max`, and `drift_min`. |
+| **Core arithmetic unchanged** | The evaluator's integer operations, bit‑width requirements, and scoring formulas are identical to 3.35.0. |
 
 ---
 
-## Algorithm Internals (Advanced Terms)
+## 4. The jitter window radius
 
-These terms appear in §3.11 and are necessary for understanding the evaluator’s inner workings. Beginners can skip this section on first reading.
+The jitter window radius `R` is derived from the map header’s `jitter_window_radius` field (byte 18) or from the library profile.
 
-**`d_lo_cont`, `d_hi_cont`**  
-The *continuous deltas* derived from the cycle time: `d_lo_cont = T / quantum` (floor), `d_hi_cont = d_lo_cont + 1`. They define how many ticks each cycle advances (the temporal pattern).  
-*See also:* Cycle Time, `adv_lo_cont`.
+- If the stored value is `0`, the default radius **10000** (21 points, ±0.1 Hz) is used.
+- If the stored value is non‑zero, the actual radius in 10⁻⁵ Hz units is **`stored_value × 1000`**.
 
-**`adv_lo_cont`, `adv_hi_cont`**  
-The continuous advances: `adv_lo_cont = (d_lo_cont * mult_num) / mult_den` (floor). These are the tick contributions per short/long cycle after applying the multiplier.  
-*See also:* `d_lo_cont`, Advance.
+The jitter offsets Δ are generated as `-R, -R+1000, -R+2000, …, +R`. All offsets are multiples of 1000 (in 10⁻⁵ Hz units). This is a critical property for cache alignment.
 
-**`Q`**  
-`Q = R / quantum`, where `R` is the rounded block time. Used to compute `N_hi = Q − N * d_lo_cont`.  
-*See also:* `R`, `N_hi`.
-
-**`R`**  
-The rounded block time: `R = round(N * T / quantum) * quantum`. The rounding uses the current `round_mode`.  
-*See also:* Block Time, Rounding Mode.
-
-**`T_min`**  
-The cycle time at the **highest frequency** in a zone (`freq_high`). Used to derive `max_eval_iterations` in long‑term scans.  
-*See also:* Cycle Time, `max_eval_iterations`.
-
-**`N_max`**  
-The upper bound for `N`: `ceil(target_ticks / max(adv_lo_cont, adv_hi_cont, 1))`. Precomputed when deltas are invariant to speed up the search for `N`.  
-*See also:* `N`, `adv_lo_cont`.
+When a candidate is near `freq = 1`, some offsets would be non‑positive; those points are silently skipped and the effective window shrinks. The standard‑deviation computation must use the actual number of valid points.
 
 ---
 
-## Memory & Execution
+## 5. The landscape of conformant optimisations
 
-**Arena / ScratchArena**  
-A temporary workspace where the scanner stores intermediate results. Think of it as a stack of sticky notes that can be torn off in one go. It keeps the scanner fast and memory‑efficient.  
-*See also:* Execution Plan.
+All techniques below are safe and conformant with **GUNZ 3.67.0**.
 
-**Execution Plan (or Plan)**  
-The compiled, immutable blueprint of a scan. Once GUNZ reads the bytecode and merges library parameters, it builds a Plan. The Plan never changes and can be reused safely by many threads at once.  
-*See also:* Arena, Reference Counting.
-
-**Reference Counting**  
-A simple way for GUNZ to manage memory safely across multiple threads. Every time a thread uses a Plan, it increases a counter (`Acquire`); when finished, it decreases the counter (`Release`). When the counter hits zero, GUNZ knows it is safe to delete the Plan.  
-*See also:* Execution Plan.
+| Rank | Technique | Typical Speed‑up | Section |
+|------|-----------|------------------|---------|
+| 1 | **Window‑aware plateau‑jump + plateau‑based cache filling** | 10–500× (combined) | §5.1, §5.2 |
+| 2 | **Per‑frequency block‑data cache + sliding‑window jitter** | ~20× (block sims) | §5.2 |
+| 3 | **Closed‑form advance regularity** | (already fast) | §5.3 |
+| 4 | **SIMD vectorisation of the jitter window** | 1.5–4× | §5.4 |
+| 5 | **Narrow integer arithmetic (64‑bit paths)** | 1.5–2× | §5.5 |
 
 ---
 
-## Scan Control & Limits
+### 5.1 Window‑aware plateau‑jump — skip only when the entire jitter window is safe
 
-**`max_scan_iterations`**  
-Maximum number of candidates to evaluate **per zone** (default ≥ 16 777 216). Prevents runaway scans on enormous zones.  
-*See also:* Zone, `total_max_scan_iterations`.
+#### Why it works
 
-**`max_eval_iterations`**  
-Maximum number of blocks to simulate **per candidate** (default ≥ 65 536). In long‑term mode, this is derived dynamically from `window_duration` and `T_min`.  
-*See also:* Long‑term Scan, `T_min`.
+The block‑time of a single frequency is piecewise‑constant over intervals where both the integer cycle count `N` and the hi‑delta count `N_hi` are constant.  
+However, the **jitter** — the standard deviation of 21 nearby frequencies — can change when the sliding window straddles a boundary between two such intervals.
 
-**`total_max_scan_iterations`**  
-Global iteration limit across **all zones** in a plan (default ≥ 67 108 864). Prevents denial‑of‑service via bytecode that expands into enormous workloads.  
-*See also:* Plan Construction, `max_scan_iterations`.
+Therefore, the score is constant **only** for candidates whose entire jitter window (all 21 offsets) lies within the same constant‑`N`/`N_hi` region.  
+Inside a plateau of width `W` steps, the interior candidates that are at least `R = jitter_window_radius` steps from either edge satisfy this condition. Their 21 jitter points all yield the same block times, so jitter, advance regularity, and score are identical. They can be safely merged.
 
-**`window_duration`**  
-The total measurement window (in base time units) for long‑term scans. The evaluator accumulates statistics until cumulative block time reaches or exceeds this value. Normative maximum: 2³² − 1 base‑time units.  
-*See also:* Long‑term Scan, `max_eval_iterations`.
+#### How to implement
 
----
+1. **Enumerate constant‑`N`/`N_hi` intervals** over the whole zone using closed‑form inequalities (see §7).
+2. For each interval of width `W` (in frequency steps):
+   - **Left edge zone** — evaluate every candidate from the interval start up to `R‑1` steps, inclusive.
+   - **Interior** — if `W ≥ 2R+1`, choose the centre candidate, evaluate it **once**, and emit a single map entry with `run_length = W − 2R`. Do not evaluate the remaining interior points.
+   - **Right edge zone** — evaluate the last `R` candidates step by step.
+   - **Small plateau** — if `W < 2R+1`, evaluate **all** candidates in the interval step‑by‑step. No skipping is possible; the plateau is too narrow to guarantee the entire jitter window remains within the constant‑`N`/`N_hi` region.
+3. Continue to the next interval.
 
-## Bytecode & Orchestration
+This respects the jitter window and guarantees bit‑identical output.
 
-**Bytecode / ISA / Opcode**  
-The low‑level instruction language that GUNZ uses to describe a scan. The **ISA** (Instruction Set Architecture) is the complete set of instructions. An **opcode** is the part of an instruction that specifies which operation to perform. You don’t need to write bytecode yourself; an AI, a library, or a tool can generate it. If you’re using the Minimal Profile, you can ignore these entirely. In 3.60.0, the bytecode version is fixed to `0x0003003C`; exact version matching is required.  
-*See also:* Minimal Profile, Lane.
+#### Computing the interval boundaries
 
-**Fuel**  
-A concept used only in the optional Dynamic Lane. Every instruction costs a little fuel; when fuel runs out, the bytecode interpreter stops. This prevents a program from looping forever. The canonical fuel table is embedded in every plan.  
-*See also:* Dynamic Lane.
+The constant‑`N`/`N_hi` intervals are those where both `d_lo_cont` and `N_hi` remain unchanged.  
+The boundary occurs where `round(N * T / quantum)` steps to the next integer, which depends on the active `round_mode`. A conformant implementation pre‑computes all such transition frequencies at plan‑construction time using integer arithmetic.
 
-**Lane (Static Lane / Dynamic Lane)**  
-GUNZ programs can run in two modes. The **Static Lane** is simple, fast, and fully deterministic—perfect for most scans. The **Dynamic Lane** is an optional virtual machine that allows more complex, self‑modifying orchestration by AI agents.  
-*See also:* Fuel, Minimal Profile.
+**Important:** This enumeration must include **all** transition points:
+- `d_lo_cont` changes (where `T` crosses an integer multiple of `quantum`).
+- `N` changes (where `target_ticks / max_adv` crosses an integer).
+- `N_hi` changes (where `round(N * T / quantum)` crosses an integer or half‑integer, depending on `round_mode`).
 
-**Minimal Profile**  
-A stripped‑down conformance tier that requires only the static lane and core evaluator. You can skip the bytecode VM, callbacks, sandboxing, and all optional features. Ideal for embedded systems or fixed‑range sweeps.  
-*See also:* Lane, Conformance.
-
-**`PURE_CALL`**  
-An optional mechanism that lets GUNZ invoke a deterministic external function during a scan. Such functions must have no side effects (no I/O, no memory allocation, no global state changes) and must always return the same output for the same input. This is used for advanced orchestration, allowing AI agents to embed custom logic without breaking determinism. When sandboxing is required, `PURE_CALL` functions are executed inside a restricted environment.  
-*See also:* Sandboxing, Environment Snapshot, Fuel.
+The companion anti‑spec `GUNZ‑UNSOLVE` deliberately ignores the third category — this guide mandates their inclusion.
 
 ---
 
-## Security & Integrity
+### 5.2 Per‑frequency block‑data cache + sliding‑window jitter
 
-**Attestation**  
-A cryptographic proof that a map was produced by a specific runtime and that callbacks were sandboxed. Uses Ed25519 signatures to guarantee the map’s provenance. When `sandboxed_callbacks_required` is set, attestation is mandatory.  
-*See also:* Ed25519, Sandboxing.
+#### Why it works
 
-**Deduplicate**  
-A flag that tells the scanner to compare new maps against previously stored ones. If an identical map already exists, the scanner can skip writing a duplicate.  
-*See also:* Fingerprint.
+Instead of recomputing the heavy block simulation for each jitter point of every candidate, we evaluate it **once per distinct frequency** and store the results.  
+Because the jitter offsets are fixed at multiples of 1000 (in 10⁻⁵ Hz) and the dense‑scan grid is integer, a cache resolution of **1** (the finest grid) guarantees that every jitter point lies exactly on a cached index. For each candidate, the 21 jitter values become a simple array look‑up.
 
-**Ed25519**  
-A modern, high‑speed elliptic‑curve digital signature algorithm. Signatures are 64 bytes long, equivalent to 128‑bit symmetric security. GUNZ uses Ed25519 to sign metadata and attestation tokens.  
-*See also:* Attestation, Fingerprint.
+**Within each constant‑`N`/`N_hi` interval, the `block_time` and `advance_reg_raw` are invariant.** This is the foundation of the plateau‑based cache.
 
-**Fingerprint (XXH3‑128, XXH3‑64)**  
-A unique, short digital fingerprint of a map or file. Like a human fingerprint, it identifies the exact content. GUNZ uses XXH3‑64 for quick integrity checks and XXH3‑128 for global deduplication and map identity. XXH3 is extremely fast and produces identical results on all platforms. The fingerprint is computed over the header fields in their exact byte order, including `step_freq` (bytes 10‑11) and the 4‑byte extension when `step_freq_overflow` is set.  
-*See also:* Deduplicate, Attestation.
+#### How to implement — with plateau‑aware cache filling
 
-**Flags**  
-Bit‑sized on/off switches in the header or map entries that control features (e.g., `FLAG_AVOID`, `FLAG_SKIPPED`, `sparse_map`). They let the same file format carry different types of information without changing the structure. In 3.60.0, reserved flag bits (3‑7) must be zero; decoders reject maps with non‑zero reserved bits.  
-*See also:* Map Entry, Long‑jump Entry.
+A naïve cache would simulate every integer step, wasting work. We combine plateau logic:
 
-**Sandboxing**  
-An optional security layer that executes callback functions inside a restricted environment (e.g., WebAssembly, Firecracker, gVisor). Required for production multi‑tenant use; not needed for single‑user tools. When `sandboxed_callbacks_required` is set, attestation is mandatory.  
-*See also:* Attestation, `PURE_CALL`.
+1. **Enumerate plateaus** — the same constant‑`N`/`N_hi` intervals used in §5.1.
+2. **For each plateau:**
+   - Run the heavy block simulation **once** at any interior frequency. This yields the `block_time` and `advance_reg_raw` valid for the entire plateau.
+   - Fill the pre‑allocated cache array for the plateau’s frequency range with those two constant values. A simple `memset` or tight loop is sufficient.
+3. **The cache is now complete.** The number of heavy simulations equals the number of plateaus — typically a few hundred instead of millions.
+4. **Sliding‑window jitter** proceeds as usual: for each candidate at index `i`, look up the 21 pre‑computed values (indices `i‑R`, `i‑R+1000`, …, `i+R`), compute population standard deviation and mean advance regularity (using SIMD if desired), then derive score and stability width.
 
-**Sentinel**  
-A special, impossible combination of values used to signal “this is not a normal entry.” For example, `run_length == 0` and `block_time_inaccuracy == 0` signals a long‑jump entry.  
-*See also:* Long‑jump Entry.
+#### Memory note
+
+For a 100 Hz zone at resolution 1, the cache requires about 80 MB (10 million entries × 8 bytes), well within the capacity of modern hardware. If memory is constrained, a GCD‑based grid can shrink the cache at the cost of slightly more complex indexing.
+
+#### Low‑frequency handling
+
+When `freq_candidate + Δ ≤ 0`, that jitter point is skipped. The cache must handle this gracefully:
+- For frequencies near `freq = 1`, the effective window size shrinks.
+- The cache lookup must skip invalid indices; do not attempt to read from negative array positions.
+- The standard deviation computation must use the actual number of valid points (not always 21).
 
 ---
 
-## General Concepts
+### 5.3 Closed‑form advance regularity
 
-**Conformance / Conformance Suite**  
-A set of tests that prove a GUNZ implementation behaves exactly as the specification demands. A conformant scanner produces bit‑identical outputs for the same inputs.  
-*See also:* Deterministic, Minimal Profile.
+The core specification permits computing advance regularity for a two‑valued multiset using the algebraically identical closed form:
 
-**Calibrated Reference**  
-A `reference_block_time` derived from a previous GUNZ map—found by locating the candidate with the smallest `block_time_inaccuracy` and computing its actual total block time. This anchors subsequent scans to empirical reality rather than guesswork. Recorded in the map header with `reference_source = 2`.  
-*See also:* Reference Block Time, Guessing Rule.
+```text
+scaled_lo = 100 * adv_lo
+scaled_hi = 100 * adv_hi
+diff      = scaled_hi - scaled_lo
 
-**Deterministic**  
-The property that the same input always produces the same output, on any machine, forever. This is **non‑negotiable** in GUNZ—floating‑point or randomness would break conformance.  
-*See also:* Conformance, Half‑to‑even Rounding.
+num = N_lo * N_hi * diff * diff
+den = (N_lo + N_hi) * (N_lo + N_hi)
 
-**Guessing Rule (Rule GUNZ_REF_GUESS)**  
-A normative rule that provides a deterministic `reference_block_time` when the user or AI does not supply one explicitly. It takes the midpoint of the first zone, runs the block simulation at that single frequency, and uses the resulting `total_time` as the seed reference. Recorded in the map header with `reference_source = 1`.  
-*See also:* Reference Block Time, Calibrated Reference.
-
-**Half‑to‑even Rounding**  
-A way of rounding numbers that breaks ties by rounding to the nearest even integer (2.5 → 2, 3.5 → 4). GUNZ uses this rule for all score computations to guarantee determinism across platforms.  
-*See also:* Deterministic, Rounding Mode.
-
-**Hibernation**  
-A cost‑aware strategy where the AI pauses active scanning when the computational cost of a new map exceeds the marginal improvement. The current map is retained as a stable operating point; the system can reawaken if drift is detected.  
-*See also:* Phoenix Mechanism.
-
-**Long‑term Scan**  
-A scan mode where the evaluator simulates multiple consecutive blocks for each candidate, accumulating statistics over a `window_duration`. The map entry stores average block time and aggregate jitter and advance regularity. Enabled by the `long_term_scan` header flag (bit 5). The header’s `long_term_scan` field (offset 30) is the sole authoritative source; there is no per‑entry flag.  
-*See also:* `window_duration`, `max_eval_iterations`.
-
-**Metadata (`.gunzmeta`)**  
-A human‑readable JSON file that accompanies every `.gunzmap`. It records the exact parameters, zone definitions, and quality summary of the scan, so you (or an AI) can reproduce the scan years later. Minimal‑profile implementations are exempt from generating it.  
-*See also:* Map Entry, Fingerprint.
-
-**Phoenix Mechanism**  
-The ability to treat a completed scan as a save point. Using `session_id` and fingerprint chains, an AI agent can resume an exploration from where it left off, even after a restart.  
-*See also:* Hibernation, Metadata.
-
-**Plateau‑jump Optimisation**  
-An implementation technique that skips large regions where the entire jitter window remains within a constant‑score interval (all Phase‑1 metrics invariant). Allowed as long as the final map is bit‑identical to a full scan. It does not interfere with stability width computation.  
-*See also:* Stability Width.
-
-**`reference_source`**  
-A field in the map header (0‑3) that records how the `reference_block_time` was obtained:
-- `0` = explicitly supplied by the user or AI
-- `1` = computed by the guessing rule (Rule GUNZ_REF_GUESS)
-- `2` = calibrated from a previous map (Calibrated Reference)
-- `3` = not applicable (no scanning was performed; `reference_block_time` defaulted to 0)  
-Decoders reject values > 3.  
-*See also:* Reference Block Time, Guessing Rule, Calibrated Reference.
-
-**Resonance**  
-In GUNZ, resonance means alignment between the simulated discrete‑clock model and the desired ideal behaviour. A resonant frequency produces low jitter and a wide stable region.  
-*See also:* Stable Region, Jitter.
-
-**Rounding Mode (`round_mode`)**  
-Controls how fractions are turned into integers when computing cycle advances and block times. Options: 0 = floor, 1 = nearest half‑to‑even, 2 = ceil, 3 = truncate. The choice affects the resonance map.  
-*See also:* Half‑to‑even Rounding, Block Time.
-
-**Score**  
-The combined metric that GUNZ uses to rank frequency candidates:  
+var = round_half_even(num, den)      // §4.5.1 – use half‑to‑even, not truncation
+advance_reg_raw = isqrt_rounded(var)
 ```
-score = |total_time - reference_block_time| + jitter_weight * jitter + advance_regularity_weight * advance_regularity_btu
-```
-A lower score is better. The weights allow users to prioritise different aspects of system behaviour. The score computation uses 128‑bit unsigned arithmetic and is saturated to `UINT64_MAX`.  
-*See also:* Jitter Weight, Advance Regularity Weight, Resonance.
 
-**Truth Anchor**  
-The reference point that defines what “correct” means for a scan. In a timing scan, it’s the `reference_block_time`. The Geas demands that we always measure truth relative to a stable, external anchor.  
-*See also:* Reference Block Time, Resonance.
+The result is saturated to 65535.  
+This formula avoids looping over individual cycles and is the **recommended** implementation.
+
+**Important:** The division by `den` must use half‑to‑even rounding. Truncation will produce incorrect results.
 
 ---
 
-## Dam‑Specific Terms (Semantic Scanner)
+### 5.4 SIMD vectorisation of the jitter window
 
-These terms belong to the Dam specification, not GUNZ. They are included for readers exploring the broader ecosystem.
+With block‑times stored in a flat array, the 21‑value standard‑deviation computation is easy to vectorise. Use integer SIMD (AVX2, NEON) to load multiple block times and accumulate sums and sums‑of‑squares in wide (128‑bit or 256‑bit) integer registers.
 
-**Consensus Answer (Dam)**  
-The single generated text (out of many runs) that has the best combined score for length alignment and structural repetition. All other answers are compared against it to measure divergence.
-
-**Divergence (Dam)**  
-A metric that measures how far a model’s outputs stray from its own best (consensus) answer. High divergence indicates inconsistent or hallucinatory behaviour.
+Because all arithmetic is exact integer, addition is associative and commutative; the SIMD reduction order does not affect the final result. No special ordering is required.
 
 ---
 
-## Miscellaneous
+### 5.5 Narrow integer arithmetic (64‑bit paths)
 
-**Big‑endian / Little‑endian**  
-Different conventions for storing multi‑byte numbers. Little‑endian puts the smallest part first (like writing 27‑07‑2026 instead of 2026‑07‑27). GUNZ always uses little‑endian.
+If static range analysis at plan‑construction time proves that all intermediate products fit in 64 bits, native 64‑bit operations may be used instead of extended precision. This can give a modest speed‑up, especially on platforms where 128‑bit software emulation is slow.
 
-**CBOR (Concise Binary Object Representation)**  
-A compact binary data format used for the optional Environment Snapshot. Think of it as a binary version of JSON that’s faster to parse.
-
-**Environment Snapshot**  
-An optional, signed, immutable snapshot of the runtime environment (hardware capabilities, library versions, etc.) bound into a plan. Allows `PURE_CALL` callbacks to read pre‑approved external data without violating purity.
-
-**Generation (Library Profile)**  
-A monotonically increasing version number attached to a library profile, assigned **only** by the offline library compiler. Prevents old maps from being accidentally mixed with new, incompatible definitions.
-
-**Library Profile**  
-A pre‑defined collection of system parameters (quantum, multiplier, rounding, jitter weight, advance regularity weight, `jitter_window_radius`, etc.) that can be shared and reused.
-
-**Object Table / Object ID**  
-GUNZ uses a private lookup table to manage resources. Instead of raw memory addresses, the bytecode uses a 32‑bit `object_id`—like a library card catalog.
-
-**RFC 8785 (JSON Canonicalization Scheme)**  
-A standard that defines a precise way to serialize JSON so the same data always produces identical bytes. GUNZ uses this for cryptographic signatures in `.gunzmeta`.
-
-**SIMD (Single Instruction, Multiple Data)**  
-A CPU feature that performs the same operation on multiple data points simultaneously (e.g., adding four pairs at once). GUNZ can use SIMD to speed up scans.
-
-**UTC (Coordinated Universal Time)**  
-The primary world time standard (same as GMT). GUNZ uses UTC timestamps in `.gunzmeta` to avoid time‑zone confusion.
-
-**WebAssembly (Wasm)**  
-A safe, portable binary instruction format for a stack‑based virtual machine. GUNZ can use WebAssembly as a sandboxing mechanism for callbacks.
-
-**XXH3**  
-A family of very fast, non‑cryptographic hash functions. GUNZ uses XXH3‑64 for per‑map integrity and XXH3‑128 for global map fingerprints. XXH3 is portable and produces identical results on all platforms.
+The analysis simply checks the maximum possible `N`, `T`, and multiplier values against the zone boundaries.
 
 ---
 
-*If a term is missing, check the full GUNZ 3.60.0 specification or the companion philosophy document. This lexicon is a living helper, not a normative standard.*
+## 6. What **not** to do — the anti‑optimisations
+
+The following shortcuts are tempting but produce **non‑conformant** maps. They are documented here so you never implement them.
+
+### 6.1 Re‑using the candidate’s block time for all jitter points
+Each jitter offset changes the frequency, which changes the block time. Assuming they are all equal is mathematically false and yields incorrect jitter values.
+
+### 6.2 Linear interpolation of block times
+Block time is not a smooth function; it’s piecewise‑constant with discrete jumps. Interpolation will miss transitions and invent non‑existent plateaus.
+
+### 6.3 Reducing the jitter window size
+The spec defines the window radius; using fewer points alters the standard deviation and breaks conformance.
+
+### 6.4 Using floating‑point arithmetic
+Floating‑point rounding is platform‑dependent and non‑deterministic. All arithmetic must be integer.
+
+### 6.5 Any “oracle” that ignores `N_hi` transitions
+As the companion anti‑spec `GUNZ‑UNSOLVE` illustrates in detail, skipping the enumeration of `N_hi` integer‑crossing points (or `N * T / quantum` boundaries) leads to maps that are **grossly inaccurate**. The only safe way to avoid a full step‑by‑step scan is the window‑aware plateau‑jump described in this guide.
+
+### 6.6 Treating `step_freq == 0` as an overflow sentinel
+In 3.67.0, `step_freq == 0` means the default step size of **1**. The overflow mechanism is the dedicated `step_freq_overflow` flag at byte 31. When set, a 4‑byte `u32` extension follows the header with the full step size. The old `0xFFFF` sentinel is removed.
+
+### 6.7 Omitting `step_freq` from the fingerprint
+The XXH3‑128 fingerprint list now includes `step_freq` (bytes 10‑11) and `step_freq_overflow` (byte 31), plus the 4‑byte extension when the overflow flag is set. Implementations that omit these will produce a different fingerprint and break deduplication.
+
+### 6.8 Hard‑coding a specific `MAX_STATIC_EVALUATORS` value
+The spec requires at least 65,536 evaluator blocks. Implementations may support more. Do not hard‑code a fixed cap lower than the implementation can handle.
+
+### 6.9 Using `reference_source = 2` for overflow‑clamped values
+`reference_source = 3` is specifically for overflow‑clamped explicit values or maps produced without scanning. Use it correctly; do not conflate it with calibrated references.
+
+---
+
+## 7. Algorithmic foundations — why the plateau‑jump is correct
+
+### 7.1 The constant‑score interval definition
+
+A candidate frequency belongs to a **constant‑score interval** if, when the candidate is shifted by any jitter offset Δ in the window, all resulting frequencies produce identical values for every field of the map entry:
+- `block_time_inaccuracy`
+- `jitter`
+- `advance_regularity`
+- `peak_advance_regularity`
+- `stability_width`
+- `flags`
+
+This implies that the entire jitter window lies within a region of constant `N` and `N_hi`.
+
+### 7.2 Why the full dense scan is the reference
+
+The evaluator’s output is defined as the result of evaluating **every frequency step** in the zone, in order. The plateau‑jump optimisation is valid only if it produces the same consolidated map as this exhaustive process. The window‑aware condition ensures this.
+
+### 7.3 Enumerating plateaus exactly
+
+To enumerate plateaus exactly, compute all frequencies where any of the following change:
+- `d_lo_cont = floor(T / quantum)`
+- `N` (the cycle count)
+- `N_hi` (the hi‑delta count, which depends on `round(N * T / quantum)`)
+
+For `round_mode = 0` (floor), `N_hi` changes when `N * T / quantum` crosses an integer.  
+For `round_mode = 1` (half‑to‑even), it changes when `N * T / quantum` crosses an integer or half‑integer (depending on the tie‑break).  
+For `round_mode = 2` (ceil) and `3` (truncate), the transition points are similarly determined.
+
+The transition frequencies can be computed in closed form using integer arithmetic; no floating‑point is required.
+
+---
+
+## 8. Putting it all together — the final scan pipeline
+
+1. **Plan construction**
+   - Compute all constant‑`N`/`N_hi` interval boundaries for the zone.
+   - Include all `N_hi` transition points (integer‑crossings of `N * T / quantum`).
+   - Perform static range analysis; decide between 64‑bit and 128‑bit arithmetic.
+   - Validate `freq_low ≥ 1` and `freq_high ≥ 1`; reject `0`.
+   - Ensure all zones (including `SKIP_ZONE` regions) are strictly disjoint.
+
+2. **Phase 1 — Build the full‑resolution block‑data cache**
+   - For each plateau, simulate one representative frequency, then fill the corresponding array segment with the resulting `block_time` and `advance_reg_raw`.
+   - The array covers every integer frequency step from `freq_low` to `freq_high`.
+   - Near `freq = 1`, handle skipped jitter points gracefully.
+
+3. **Phase 2 — Candidate evaluation (sliding window)**
+   - Use the window‑aware plateau‑jump rules from §5.1: evaluate edge zones step‑by‑step; for each safe interior, evaluate one candidate and emit a merged entry.
+   - For every evaluated candidate, read the 21 pre‑computed values from the cache (skipping invalid indices), compute jitter and advance regularity (SIMD‑accelerated if available), then calculate score and stability width.
+
+4. **Phase 3 — Map emission**
+   - Apply run‑length consolidation. When a split occurs due to overflow, the first piece keeps its original `freq_delta_start`; subsequent pieces set it to `0`.
+   - Long‑jump entries: emit sentinel `run_length == 0 && block_time_inaccuracy == 0`; fill bytes 8‑15 with the `s64` gap. No individual field within that range is interpreted separately.
+   - Sparse merging: accumulate omitted run lengths into the next emitted entry’s `freq_delta_start`; if the accumulated offset would exceed 32767, emit a long‑jump entry and reset the accumulator.
+   - Write `step_freq` into bytes 10‑11 of the map header. Write `step_freq_overflow` into byte 31. If the effective step size exceeds 65535, set `step_freq_overflow = 1`, write `0` in the `step_freq` u16 field, and place the full 32‑bit step size as a little‑endian `u32` extension immediately after the header.
+   - Compute the XXH3‑64 checksum over the entries.
+   - Include `step_freq` (bytes 10‑11), `step_freq_overflow` (byte 31), and the 4‑byte extension (when `step_freq_overflow = 1`) in the XXH3‑128 fingerprint as specified in §4.3 of the core specification.
+
+---
+
+## 9. Implementation checklist for 3.67.0
+
+| Item | Check |
+|------|-------|
+| `jitter_window_radius` derived correctly (stored value × 1000, or default 10000) | ☐ |
+| Small‑plateau edge case (`W < 2R+1`) handled | ☐ |
+| `freq_low ≥ 1` and `freq_high ≥ 1` validation | ☐ |
+| Jitter‑point skipping when `freq + Δ ≤ 0` | ☐ |
+| Window‑aware plateau‑jump with **all** `N_hi` transitions included | ☐ |
+| Cache filling by plateau, not by step | ☐ |
+| Closed‑form advance regularity with half‑to‑even rounding | ☐ |
+| SIMD jitter window (optional) | ☐ |
+| 64‑bit path if safe (optional) | ☐ |
+| Long‑jump sentinel used; no separate flag interpretation | ☐ |
+| `JOIN` allows long‑jump entries unconditionally | ☐ |
+| `MAX_STATIC_EVALUATORS` ≥ 65,536 | ☐ |
+| No floating‑point arithmetic | ☐ |
+| `reference_source = 3` for maps without scanning | ☐ |
+| `step_freq` written to header (bytes 10‑11); `step_freq_overflow` at byte 31 | ☐ |
+| `step_freq_overflow` extension written when needed (4‑byte `u32` after header) | ☐ |
+| Map version `0x0040`; bytecode version `0x00030043` | ☐ |
+| `advance_regularity_weight` and `jitter_weight` (bytes 8‑9) always 1‑255 | ☐ |
+| `stability_mapping_flag` (byte 15) set to `1` | ☐ |
+| `step_freq`, `step_freq_overflow`, and extension included in XXH3‑128 fingerprint | ☐ |
+| Run‑length overflow split: first piece keeps original `freq_delta_start`; subsequent piece(s) `freq_delta_start = 0` | ☐ |
+| Sparse accumulator overflow → emit long‑jump entry | ☐ |
+| Zones (including `SKIP_ZONE`) strictly disjoint; overlapping rejected | ☐ |
+| `JOIN` compatibility checks include `map_type` and detriment thresholds | ☐ |
+| `ADVANCE` validated non‑zero for both numerator and denominator | ☐ |
+| `LOOP` bounds‑check performed | ☐ |
+
+---
+
+## 10. Common pitfalls and how to avoid them
+
+| Pitfall | Fix |
+|---------|-----|
+| Missing `N_hi` transitions in plateau enumeration | Include all `round(N*T/quantum)` integer‑crossing points. |
+| Using truncating division in closed‑form advance regularity | Use `round_half_even` as per §4.5.1. |
+| Assuming `FLAG_SKIPPED` must be set on long‑jumps | The sentinel alone identifies a long‑jump; flags are not interpreted. |
+| Hard‑coding `MAX_STATIC_EVALUATORS` to 65,536 | Support at least 65,536; allow more. |
+| Using floating‑point for `T` or `score` | All arithmetic must be integer. |
+| Forgetting to handle invalid jitter indices near `freq = 1` | Skip points where `freq + Δ ≤ 0`. |
+| Treating `reference_source = 3` as calibrated | It means no scanning was performed. |
+| Missing small‑plateau edge case | If `W < 2R+1`, evaluate all candidates step‑by‑step. |
+| Not defining `R` explicitly | `R = 10000` (default) or `stored_value × 1000`. |
+| Confusing `step_freq == 0` with overflow mechanism | `0` = default (step 1); overflow uses `step_freq_overflow` flag at byte 31. |
+| Forgetting to write the 4‑byte extension when overflow is set | Extension follows immediately after the 32‑byte header. |
+| Omitting `step_freq_overflow` and extension from fingerprint | The fingerprint list in §4.3 includes both when the flag is set. |
+| Not validating that zones are strictly disjoint | Reject bytecode with any overlapping `ZONE` or `SKIP_ZONE` at plan construction. |
+| Writing zero weights in map header | `jitter_weight` and `advance_regularity_weight` must be 1‑255. |
+| Setting `stability_mapping_flag` to anything other than `1` | Map will be rejected by conformant decoders. |
+| Using `long_term_scan` as a per‑entry flag | It is a header‑only field (byte 30). |
+
+---
+
+## 11. Acknowledgments
+
+The window‑aware plateau‑jump, plateau‑based cache filling, and the correction of the half‑to‑even rounding oversight are the direct result of rigorous community review. Special thanks to the reviewers who caught the fatal flaw in the original plateau‑jump description and insisted on mathematical rigour. This guide is stronger because of that scrutiny.
+
+The refinements up to 3.67.0 — the `step_freq_overflow` mechanism, the mandatory weight fields, the `stability_mapping_flag`, the drift extension updates, and the fingerprint completeness — also emerged from the same iterative review process.
+
+---
+
+*GUNZ 3.67.0 — Performance Implementation Guide — end.*
