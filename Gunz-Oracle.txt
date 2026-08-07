@@ -1,19 +1,5 @@
-**GUNZ‑ORACLE — Constraint‑Query Companion Specification**  
-*Draft 0.6.1 — Companion to GUNZ 3.67.0*
-
----
-
-## Changes from 0.5
-
-- **Integration with GUNZ 3.67.0:** Opcode `0x0D` is formally reserved in the GUNZ opcode table; the execution model is defined in this companion specification.
-- **`PURE_CALL` non‑invocation clarified:** The captured callback is not invoked during an ORACLE query.
-- **Thread safety note added:** ORACLE modifies no shared VM state.
-- **CQR endianness explicitly stated:** All multi‑byte integers are little‑endian.
-- **CQR‑to‑map conversion mentioned:** Informative note on trivial conversion.
-- **Deduplication fingerprint added:** CQR files may carry an XXH3‑128 fingerprint.
-- **Adaptive fallback guidance:** Implementation‑defined threshold, with 10 % of dense‑scan candidate count as a conservative default.
-- **Error handling tightened:** `freq_low ≥ freq_high`, `freq_low < 1`, and invalid `query_class` or `flags` rejected with `GUNZ_MALFORMED_BYTECODE`.
-- **Version bump** to reflect companion maturity.
+# GUNZ‑ORACLE — Constraint‑Query Companion Specification  
+**Version 0.6.2 — Companion to GUNZ 3.67.0**
 
 ---
 
@@ -72,7 +58,7 @@ The oracle uses the current system state (multiplier, rounding mode, delta pair,
 ## 4. Output Format
 
 The oracle produces a **Constraint Query Result (CQR)** file with the extension `.gunzoracle`.  
-The file consists of a 24‑byte header followed by a packed sequence of 24‑byte interval records.
+The file consists of a 24‑byte header followed by a packed sequence of **28‑byte** interval records.
 
 All multi‑byte integers are encoded in **little‑endian** byte order, consistent with GUNZ 3.67.0.
 
@@ -90,19 +76,22 @@ All multi‑byte integers are encoded in **little‑endian** byte order, consist
 
 The header is exactly 24 bytes.
 
-### 4.2 Interval Record (24 bytes)
+### 4.2 Interval Record (28 bytes)
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
-| 0 | u32 | `start_freq` | Start of the satisfying interval, in 10⁻⁵ Hz units. |
-| 4 | u32 | `end_freq` | End of the satisfying interval, inclusive. |
-| 8 | u32 | `best_block_time_inaccuracy` | Minimum block‑time inaccuracy observed in this interval. |
+| 0  | u32 | `start_freq` | Start of the satisfying interval, in 10⁻⁵ Hz units. |
+| 4  | u32 | `end_freq` | End of the satisfying interval, inclusive. |
+| 8  | u32 | `best_block_time_inaccuracy` | Minimum block‑time inaccuracy observed in this interval. |
 | 12 | u8  | `best_jitter` | Minimum jitter observed. |
 | 13 | u16 | `best_advance_regularity` | Minimum advance regularity observed. |
-| 15 | u8  | `best_stability_width` | Maximum stability width observed, in 0.0001 Hz units.  Only meaningful when `query_class = 1`; otherwise zero. |
-| 16 | u64 | `best_score` | Minimum score observed, in base‑time units.  This is the full 64‑bit saturated score as computed by the core evaluator (§3.11 step 4). |
+| 15 | **u16** | `best_stability_width` | Maximum stability width observed, in 0.0001 Hz units.  This field matches the precision of the map entry exactly; no truncation. |
+| 17 | **u8[3]** | `reserved` | Reserved; must be `0x00`. |
+| 20 | u64 | `best_score` | Minimum score observed, in base‑time units.  This is the full 64‑bit saturated score as computed by the core evaluator (§3.11 step 4). |
 
-Total record size: 24 bytes.
+Total record size: 28 bytes.
+
+All per‑interval metrics are now exact and lossless, identical to their map‑entry counterparts.  The reserved bytes provide space for future extensions without altering the record size.
 
 Intervals are contiguous.  If no interval satisfies the constraints, the file contains zero records and the `xxh3_64` checksum is computed over an empty byte sequence.  The `interval_count` field must be `0` in that case.
 
@@ -152,7 +141,7 @@ The set of critical frequencies in `[freq_low, freq_high]` is obtained as follow
 
    If `freq_low ≤ f_candidate ≤ freq_high`, add `f_candidate` to the list.
 
-   *Rationale:* The score of a candidate frequency `f` depends on the metrics evaluated at `f + Δ` for all jitter offsets.  A change in score can occur whenever **any** `f + Δ` crosses a critical point, i.e. at `f = f_c − Δ`.  By including every `f_c + Δ` (clamped to the query range) in the partition set, we guarantee that within any resulting sub‑interval `[f_a, f_b]` the set of critical points that fall inside the jitter window of a candidate is invariant.  Consequently the score is truly constant across the sub‑interval, and the midpoint evaluation is valid.
+  *Rationale:* The score of a candidate frequency `f` depends on the metrics evaluated at `f + Δ` for all jitter offsets.  A change in score can occur whenever **any** `f + Δ` crosses a critical point, i.e. at `f = f_c − Δ`.  By including every `f_c + Δ` (clamped to the query range) in the partition set, we guarantee that within any resulting sub‑interval `[f_a, f_b]` the set of critical points that fall inside the jitter window of a candidate is invariant.  Consequently the score is truly constant across the sub‑interval, and the midpoint evaluation is valid.
 
 4. **Sort** the combined list, add `freq_low` and `freq_high`, and remove duplicates.
 
@@ -244,4 +233,4 @@ ORACLE  0,              ; query_class = 0 (per‑candidate only)
 
 ---
 
-*GUNZ‑ORACLE — Companion to GUNZ 3.67.0 — draft 0.6.1*
+*GUNZ‑ORACLE — Companion to GUNZ 3.67.0 — version 0.6.2*
