@@ -1,6 +1,6 @@
 # GUNZ Adaptive Orchestration Patterns *(Informative Companion)*
 
-**Version:** 1.2 — Companion to GUNZ 3.60.0  
+**Version:** 1.3 — Companion to GUNZ 3.67.0  
 **Status:** Informative, non‑normative  
 **Purpose:** Describe idiomatic patterns for using static resonance maps as building blocks for dynamic, condition‑aware system tuning.
 
@@ -39,6 +39,9 @@ Use the `JOIN` opcode to intersect two maps. The resulting map uses pessimistic 
 **Visual overlay:**  
 Decode two maps and plot their `stability_width`, `FLAG_AVOID`, or score on the same frequency axis. Many tuning tools can import the 16‑byte entry format or the `.gunzstats` raw data to produce overlaid spectrograms.
 
+**Dewaster analysis:**  
+Feed the joined map to the **DEWASTER** companion tool to automatically extract the Efficiency Horizon and Doomfall across all conditions. This gives you the Pareto‑optimal operating points that survive under every tested environment.
+
 ---
 
 ## 4. Building Performance Curves from Maps
@@ -54,21 +57,21 @@ A single map provides a one‑dimensional cross‑section (score vs. frequency) 
 
 **Example – Multi‑resolution deepening curve:**
 
-- Follow the iterative deepening procedure (§3.4.3 of the specification): scan the same band at `time_unit = 3`, `6`, `9`, `12`.
+- Follow the iterative deepening procedure (§3.4.3 of the GUNZ 3.67.0 specification): scan the same band at `time_unit = 3`, `6`, `9`, `12`.
 - For each resolution, record the frequency of the minimum‑score candidate and its stability width.
 - The sequence forms a convergence curve showing how the optimum sharpens with finer time quantisation.
 
-**GUNZ features used:** `.gunzstats` (raw per‑candidate data), `.gunzmeta` (parameter records), deterministic grid for exact alignment across maps.
+**GUNZ features used:** `.gunzstats` (raw per‑candidate data in 32‑byte records with magic `0x475A4C02`), `.gunzmeta` (parameter records), deterministic grid for exact alignment across maps.
 
 ---
 
 ## 5. Chaining Maps into a Refinement History
 
-The phoenix mechanism (§7 of the specification) allows maps produced by the same exploration session to be linked into a chain. Each map can reference the next via `chain_next_fingerprint` and its position with `chain_sequence`.
+The Phoenix mechanism (§7 of the GUNZ 3.67.0 specification) allows maps produced by the same exploration session to be linked into a chain. Each map can reference the next via `chain_next_fingerprint` and its position with `chain_sequence`.
 
 **Pattern – Iterative calibrated refinement:**
 
-1. Start with a seed reference (guessed or explicit).
+1. Start with a seed reference (guessed or explicit, recorded as `reference_source = 0` or `1`).
 2. Generate Map 1. Identify the candidate with the smallest `block_time_inaccuracy`.
 3. Compute its actual total block time; this becomes the calibrated reference for Map 2.
 4. Generate Map 2 with `reference_source = 2` and `chain_sequence = 1`, linking back to Map 1.
@@ -100,7 +103,7 @@ while (system_running) {
 **Note on jitter saturation:** The map entry’s `jitter` field is a `u8` saturated to 255 (base time units). If your expected jitter regularly exceeds this, the raw `.gunzstats` file provides full‑precision values and should be used for monitoring. The saturated map entry still correctly indicates whether the zone is detrimental or not.
 
 **Adaptive re‑scanning:**  
-When no library map matches, the orchestrator can dynamically construct a new bytecode program (using the Full Profile VM) with the current observed `reference_block_time` (calibrated) and request a scan. The new map then enters the library for future use. The GUNZ runtime itself never initiates re‑scans; that action is always triggered from outside.
+When no library map matches, the orchestrator can dynamically construct a new bytecode program (using the Full Profile VM, bytecode version `0x00030043`) with the current observed `reference_block_time` (calibrated) and request a scan. The new map then enters the library for future use. The GUNZ runtime itself never initiates re‑scans; that action is always triggered from outside.
 
 ---
 
@@ -122,7 +125,58 @@ Because the snapshot is part of the plan’s identity, any two executions with t
 
 ---
 
-## 8. Archival and Historical Analysis
+## 8. Oracle‑Guided Constraint Tuning
+
+The **ORACLE** companion specification enables constraint‑based queries without full scans. This dramatically accelerates the search for operating points that meet specific requirements.
+
+**Pattern – Fast feasibility check:**
+
+1. Define your hard constraints: `max_jitter`, `min_stability_width`, `max_block_time_inaccuracy`.
+2. Issue an Oracle query over the target frequency range.
+3. If the Oracle returns non‑empty intervals, operating points exist that satisfy all constraints. Pick the midpoint of the widest interval.
+4. If empty, relax the least critical constraint and re‑query.
+
+**Pattern – Oracle‑assisted Dewaster refinement:**
+
+1. Use the Oracle to find all intervals satisfying coarse constraints.
+2. Within each interval, run a local dense scan with drift enabled (GUNZ‑DRIFT).
+3. Feed the resulting maps to the Dewaster to extract the Efficiency Horizon.
+4. Select the horizon point with the lowest drift velocity (`drift_max − drift_min`).
+
+**GUNZ features used:** GUNZ‑ORACLE, GUNZ‑DRIFT, DEWASTER, `.gunzoracle` output format.
+
+---
+
+## 9. Drift‑Aware Calibration
+
+The **DRIFT** extension captures intra‑block directional timing — the slope of per‑cycle advances within a block. Combined with the drift velocity metric (`drift_max − drift_min`), it reveals not just where the timing is stable, but whether that stability is robust or fragile.
+
+**Pattern – Avoiding knife‑edge operating points:**
+
+1. Run a dense scan with drift enabled across your target range.
+2. For each candidate, extract:
+   - `score` (from the map or `.gunzstats`)
+   - `drift` (average directional slope)
+   - `drift_velocity = drift_max − drift_min` (swing across the jitter window)
+3. Prefer candidates with:
+   - Low score (truth‑aligned)
+   - Low |drift| (balanced internal timing)
+   - Moderate drift velocity (adaptive, not fragile)
+
+**Interpretation guide:**
+
+| Drift | Velocity | Meaning |
+|-------|----------|---------|
+| ~0 | ~0 | Perfectly still — either the ultimate basin or the smoothing trap. |
+| ~0 | Low | Adaptive resonance; the snowball rolls gently with perturbations. |
+| ~0 | High | Fragile knife‑edge; stable only at the exact center. |
+| Non‑zero | Any | Biased timing; long cycles cluster toward one end of the block. |
+
+**GUNZ features used:** GUNZ‑DRIFT (`.gunzstats` drift fields at offsets 24‑28), GUNZ‑Dewaster.
+
+---
+
+## 10. Archival and Historical Analysis
 
 Map libraries are immutable and can be stored alongside firmware or system images. Since every map carries its own integrity proof (XXH3‑64) and a globally unique fingerprint (XXH3‑128), they can be treated as tamper‑evident documents.
 
@@ -132,26 +186,33 @@ Map libraries are immutable and can be stored alongside firmware or system image
 - Plot the evolution of the minimum achievable `block_time_inaccuracy` or stability width at the operating frequency.
 - A gradual drift indicates hardware aging or clock degradation, providing an early warning before timing violations occur.
 
+**Persona‑aware archival:**  
+If you are using **GUNZ‑PERSONA**, link each health‑check map to the AI’s identity map via `chain_next_fingerprint`. This records not just *what* was measured, but *who* measured it and in what internal state. The calibration history becomes part of the AI’s permanent identity.
+
 ---
 
-## 9. Important Limitations
+## 11. Important Limitations
 
 - **Maps are static.** They do not update themselves. If the physical system changes (e.g., a fan turns on, changing temperature), a previously optimal frequency may become detrimental. The orchestrator must detect this and act.
 - **The map only knows its own scan conditions.** Using a map outside its original environment is valid only if you are confident the resonance landscape hasn’t shifted. Always verify with a short validation measurement if possible.
+- **Drift and velocity are not part of the core map entry.** They reside in the companion `.gunzstats` file. Ensure your pipeline preserves these files if you rely on drift‑aware calibration.
+- **Oracle queries are deterministic but require the GUNZ‑ORACLE companion.** Implementations that do not support ORACLE will reject its opcode.
 
 ---
 
-## 10. Summary
+## 12. Summary
 
 | Pattern | Key GUNZ feature | Adaptation triggers |
 |---------|------------------|---------------------|
 | Environmental map library | Fingerprints, `session_id`, `.gunzmeta` | External monitor detects condition change |
-| Map overlay / JOIN | `JOIN` opcode, spatial continuity | Manual or scheduled intersection |
-| Curve building | `.gunzstats`, `.gunzmeta`, deterministic grid | Offline analysis, AI decision‑making |
+| Map overlay / JOIN | `JOIN` opcode, spatial continuity, Dewaster | Manual or scheduled intersection |
+| Curve building | `.gunzstats` (32‑byte, magic `0x475A4C02`), `.gunzmeta`, deterministic grid | Offline analysis, AI decision‑making |
 | Chained refinement | Calibrated reference, `chain_sequence` | Convergence monitoring |
 | Runtime switching | Library of pre‑computed maps, monitor | Jitter / regularity drift detection |
 | Self‑adaptive bytecode | `PURE_CALL`, Environment Snapshot | Internal program logic (deterministic) |
-| Archival & health tracking | XXH3‑64, XXH3‑128, chaining | Scheduled health scans |
+| Oracle‑guided tuning | GUNZ‑ORACLE, GUNZ‑DRIFT, Dewaster | Constraint‑based queries |
+| Drift‑aware calibration | GUNZ‑DRIFT (velocity = drift_max − drift_min) | Fragility detection |
+| Archival & health tracking | XXH3‑64, XXH3‑128, chaining, GUNZ‑PERSONA | Scheduled health scans |
 
 These patterns are not exhaustive; they are starting points. The static, verifiable nature of GUNZ maps makes them reliable anchors for dynamic systems, but the intelligence that weaves them together lies entirely in the orchestrator — and that is by design.
 
