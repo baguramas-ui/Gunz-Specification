@@ -1,19 +1,22 @@
-## GUNZ 3.60.0 — Normative Bit‑Width Requirements  
-	**Companion Reference**
-	*This is a non‑normative companion to GUNZ 3.60.0, provided for implementer convenience. The authoritative requirements are in §3.11 and §4.5.3 of the main specification.*
-
-
-The required bit‑widths are not arbitrary; they are the **smallest widths that are mathematically safe for all valid parameter combinations**.  I will show why each “large” requirement is necessary, so you can see that none of them are over‑estimates.
+# GUNZ 3.67.0 — Normative Bit‑Width Requirements  
+**Companion Reference**
+*This is a non‑normative companion to GUNZ 3.67.0, provided for implementer convenience. The authoritative requirements are in §3.11 and §4.5.3 of the main specification.*
 
 ---
 
- The specification requires that **every computation listed in the table must be performed with at least the stated bit‑width**.  Implementers may not choose a narrower type even if they believe a particular input combination will not overflow, because the specification is designed to be safe for **all valid parameter combinations** — including worst‑case `time_unit`, maximum `mult_num`, minimum `quantum`, and extreme `N`.
+The required bit‑widths are not arbitrary; they are the **smallest widths that are mathematically safe for all valid parameter combinations**.  I will show why each "large" requirement is necessary, so you can see that none of them are over‑estimates.
+
+---
+
+The specification requires that **every computation listed in the table must be performed with at least the stated bit‑width**.  Implementers may not choose a narrower type even if they believe a particular input combination will not overflow, because the specification is designed to be safe for **all valid parameter combinations** — including worst‑case `time_unit`, maximum `mult_num`, minimum `quantum`, and extreme `N`.
 
 The one exception is the **standard deviation accumulation width relaxation** described in §4.5.3: an implementation *may* use narrower intermediates (e.g., 128‑bit instead of 256‑bit for `S2` and `V`) **if and only if** it can mathematically prove that the resulting standard deviation is bit‑identical to the output of the 256‑bit computation for all inputs within the normative bounds.  This is a high bar; in practice, most implementations will simply follow the table.
 
 For all other operations, there is no relaxation.  The listed bit‑widths are mandatory.
 
-Below is the complete, verified bit‑width requirements table for GUNZ 3.60.0, including every operation that carries an explicit normative width.  The table consolidates requirements from §3.11 and §4.5.3; no entry is new or speculative.
+Below is the complete, verified bit‑width requirements table for GUNZ 3.67.0, including every operation that carries an explicit normative width.  The table consolidates requirements from §3.11 and §4.5.3; no entry is new or speculative.
+
+GUNZ 3.67.0 introduces several new features — `advance_regularity_weight` and `jitter_weight` in the map header (always resolved to 1‑255), the `stability_mapping_flag`, the `step_freq_overflow` mechanism at byte 31 with a 4‑byte extension, `long_term_scan` as a header field, and the full companion ecosystem (DEWASTER, ORACLE, DRIFT, ROSETTA, PERSONA). **None of these additions change the core arithmetic or the bit‑width requirements.** The evaluator's integer operations remain identical to those in GUNZ 3.60.0; the new features are either header fields, companion tools, or metadata that do not participate in the hot‑path arithmetic.
 
 ---
 
@@ -42,7 +45,7 @@ Below is the complete, verified bit‑width requirements table for GUNZ 3.60.0
 
 ---
 
-*Note: This table collects requirements already present in §3.11 and §4.5.3; it introduces no new constraints.*
+*Note: This table collects requirements already present in §3.11 and §4.5.3; it introduces no new constraints. The companion specifications (DEWASTER, ORACLE, DRIFT, PERSONA, HOLEISM) may impose their own additional bit‑width requirements; consult each companion's normative sections.*
 
 ---
 
