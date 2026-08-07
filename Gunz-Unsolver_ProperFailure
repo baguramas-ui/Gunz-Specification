@@ -1,11 +1,11 @@
-# GUNZ‑UNSOLVE: The Anti‑Specification  
+## GUNZ‑UNSOLVE: The Anti‑Specification  
 *“Exactly what you SHALL NOT do.”*
 
 ---
 
 ## ⚠️ WARNING ⚠️
 
-**This document describes a deliberately flawed, non‑conformant, experimental extension that violates the core principles of GUNZ 3.60.0.**
+**This document describes a deliberately flawed, non‑conformant, experimental extension that violates the core principles of GUNZ 3.67.0.**
 
 **Do not use it for calibration, tuning, certification, or any production purpose.**
 
@@ -66,7 +66,7 @@ The UNSOLVE solver **ignores all of these transitions**. It samples one point pe
 ### 4. The Opcode (For Completeness)
 
 The `UNSOLVE` opcode (`0xDE`) is defined solely for this anti‑specification.  
-**No conformant GUNZ 3.60.0 implementation will execute it** — the opcode lies outside the defined static and dynamic lane sets, and any compliant runtime will reject the bytecode with `GUNZ_MALFORMED_BYTECODE` before execution.
+**No conformant GUNZ 3.67.0 implementation will execute it** — the opcode lies outside the defined static and dynamic lane sets, and any compliant runtime will reject the bytecode with `GUNZ_MALFORMED_BYTECODE` before execution.
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
@@ -102,7 +102,7 @@ This is exactly what you SHALL NOT do.
 
 ### 6. Why This Is Wrong
 
-| Correct Approach (GUNZ 3.60.0) | UNSOLVE Approach |
+| Correct Approach (GUNZ 3.67.0) | UNSOLVE Approach |
 |----------------------------------|------------------|
 | Enumerate all `N_hi` integer‑crossing points. | Ignores them. |
 | Score constant over tiny intervals (~6 steps at `time_unit=9`). | Assumes score constant over large `d_lo_cont` intervals. |
@@ -114,13 +114,15 @@ This is exactly what you SHALL NOT do.
 
 ### 7. What You Should Do Instead
 
-**Use the dense scanner with plateau‑jump optimisation (§7 of the GUNZ 3.60.0 specification).**
+**Use the dense scanner with plateau‑jump optimisation (§7 of the GUNZ 3.67.0 specification).**
 
 The dense scanner:
 - Evaluates every frequency step (or every plateau boundary) correctly.
 - Produces a bit‑identical, certifiable map.
 - Is fast enough for all practical purposes.
 - Is the correct tool for the job.
+
+Alternatively, use the **GUNZ‑ORACLE** companion specification, which solves the inverse problem *correctly* by enumerating all critical points — including `d_lo_cont` boundaries, `N_hi` crossings (with proper handling of all four rounding modes), and jitter‑window expansion. ORACLE produces bit‑identical results that match the dense scan exactly. It is the right way to do what UNSOLVE attempts to cheat.
 
 The UNSOLVE extension is a **trap**. It promises speed but delivers false maps. It is a reminder that you cannot out‑math the GUNZ evaluator.
 
@@ -132,7 +134,7 @@ If, despite all warnings, you produce a map using UNSOLVE, it **must** be marked
 
 ```json
 {
-  "gunz_version": "3.60.0",
+  "gunz_version": "3.67.0",
   "map_fingerprint": "...",
   "creation_timestamp": "...",
   "session_id": null,
@@ -152,7 +154,7 @@ If, despite all warnings, you produce a map using UNSOLVE, it **must** be marked
 }
 ```
 
-All other GUNZ 3.60.0 metadata requirements (§4.6) apply unchanged; the fields above are additional mandatory markers for any UNSOLVE‑produced map.
+All other GUNZ 3.67.0 metadata requirements (§4.6) apply unchanged; the fields above are additional mandatory markers for any UNSOLVE‑produced map.
 
 ---
 
@@ -172,9 +174,9 @@ UNSOLVE is the shortcut. It is the warning. It is exactly what you SHALL NOT do.
 
 ### 10. Conformance Statement
 
-**This extension is non‑normative and deliberately non‑conformant.** It is not part of the GUNZ 3.60.0 core specification. Implementations that support `UNSOLVE` must mark the output maps as non‑canonical and zero fidelity as described in §8.
+**This extension is non‑normative and deliberately non‑conformant.** It is not part of the GUNZ 3.67.0 core specification. Implementations that support `UNSOLVE` must mark the output maps as non‑canonical and zero fidelity as described in §8.
 
-**Conformance to GUNZ 3.60.0 does not require support for UNSOLVE.** In fact, conformant implementations are **discouraged** from implementing it, as it undermines the trust model of the GUNZ ecosystem.
+**Conformance to GUNZ 3.67.0 does not require support for UNSOLVE.** In fact, conformant implementations are **discouraged** from implementing it, as it undermines the trust model of the GUNZ ecosystem.
 
 ---
 
