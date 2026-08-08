@@ -1,5 +1,12 @@
 # GUNZ‑ORACLE — Constraint‑Query Companion Specification  
-**Version 0.6.2 — Companion to GUNZ 3.67.0**
+**Version 0.6.3 — Companion to GUNZ 3.67.0**
+
+---
+
+## Version History
+
+- **v0.6.3:** Clarified `best_stability_width` for `query_class = 0` (set to zero). Added 128‑bit arithmetic safety note for critical‑point enumeration. Clarified `best_stability_width` handling in fast‑path and full‑path algorithms.
+- **v0.6.2:** Initial published version.
 
 ---
 
@@ -85,7 +92,7 @@ The header is exactly 24 bytes.
 | 8  | u32 | `best_block_time_inaccuracy` | Minimum block‑time inaccuracy observed in this interval. |
 | 12 | u8  | `best_jitter` | Minimum jitter observed. |
 | 13 | u16 | `best_advance_regularity` | Minimum advance regularity observed. |
-| 15 | **u16** | `best_stability_width` | Maximum stability width observed, in 0.0001 Hz units.  This field matches the precision of the map entry exactly; no truncation. |
+| 15 | **u16** | `best_stability_width` | Maximum stability width observed, in 0.0001 Hz units.  For `query_class = 0`, stability width is not evaluated; this field **shall** be set to `0`.  This field matches the precision of the map entry exactly; no truncation. |
 | 17 | **u8[3]** | `reserved` | Reserved; must be `0x00`. |
 | 20 | u64 | `best_score` | Minimum score observed, in base‑time units.  This is the full 64‑bit saturated score as computed by the core evaluator (§3.11 step 4). |
 
@@ -122,6 +129,8 @@ The set of critical frequencies in `[freq_low, freq_high]` is obtained as follow
 
 - **`N` changes** wherever `d_lo_cont` changes, so the boundaries are already included in the `d_lo_cont` enumeration.
 
+All intermediate multiplications in the critical‑point formulas shall use **128‑bit unsigned arithmetic** to prevent overflow.  The numerators `10^(time_unit+5)` and `10^(time_unit+5) * N` can exceed 64 bits for fine `time_unit`; using 128‑bit intermediates guarantees exact, deterministic results consistent with the core evaluator’s arithmetic model.
+
 **All three boundary types must be enumerated.**  Omitting the `N_hi` crossings (as the UNSOLVE anti‑specification did) produces incorrect results for fine time units.
 
 ### 5.2 Algorithm
@@ -153,6 +162,8 @@ The set of critical frequencies in `[freq_low, freq_high]` is obtained as follow
 
 8. **Merge** adjacent satisfying sub‑intervals.
 
+For `query_class = 0`, the per‑interval `best_stability_width` is set to `0`; it is not computed.
+
 ### 5.3 Performance and Adaptive Fallback
 
 The number of critical points is proportional to the number of `d_lo_cont` intervals plus the number of `N_hi` integer‑crossings.  For coarse `time_unit` (≤ 6), the critical‑point count is far smaller than the number of dense‑scan candidates, yielding significant speedup.
@@ -169,7 +180,7 @@ The algorithm is:
 
 1. Run the full dense scan (§3.11, both phases) over the query range.
 2. For each consolidated entry, test the per‑candidate metrics and the stability width against the constraints.
-3. Emit a CQR interval record for every consolidated entry that satisfies all constraints.
+3. Emit a CQR interval record for every consolidated entry that satisfies all constraints.  Since `query_class = 1`, the `best_stability_width` field contains the actual stability width from the consolidated map entry.
 
 This path is functionally equivalent to running a dense scan and filtering the resulting map.  It offers no performance advantage, but it provides a uniform interface for constraint queries.
 
@@ -190,8 +201,9 @@ Conformant implementations **may** offer an API that invokes the oracle with the
 A conformant GUNZ‑ORACLE implementation must:
 
 - Recognise the `ORACLE` opcode in static‑lane programs and reject it if `query_class` is not `0` or `1`, if `flags` is non‑zero, or if `freq_low ≥ freq_high` or `freq_low < 1`.
-- Enumerate critical points exactly as defined in §5.1–§5.2, including `d_lo_cont` boundaries, rounding‑mode‑aware `N_hi` crossings (per constant‑`N` interval), and jitter‑window expansion.
+- Enumerate critical points exactly as defined in §5.1–§5.2, including `d_lo_cont` boundaries, rounding‑mode‑aware `N_hi` crossings (per constant‑`N` interval), and jitter‑window expansion, using **128‑bit unsigned arithmetic** for all intermediate multiplications in critical‑point formulas.
 - Use 64‑bit arithmetic for the midpoint addition in §5.2 step 5.
+- For `query_class = 0`, set `best_stability_width` to `0` in all emitted interval records.
 - Produce bit‑identical CQR files for identical inputs.
 - Include a valid `xxh3_64` checksum in the CQR header.
 - Return `GUNZ_MALFORMED_BYTECODE` if `ORACLE` appears in a dynamic‑lane program or if the opcode’s `flags` byte is non‑zero.
@@ -233,4 +245,4 @@ ORACLE  0,              ; query_class = 0 (per‑candidate only)
 
 ---
 
-*GUNZ‑ORACLE — Companion to GUNZ 3.67.0 — version 0.6.2*
+*GUNZ‑ORACLE — Companion to GUNZ 3.67.0 — version 0.6.3*
