@@ -1,5 +1,17 @@
-# GUNZ‑DRIFT 1.0 — Intra‑Block Advance Trend Metric Extension  
-*Companion to GUNZ 3.67.0*
+# GUNZ‑DRIFT 1.1 — Intra‑Block Advance Trend Metric Extension  
+*Companion to GUNZ 3.67.0 and later*
+
+---
+
+## Version History
+
+**Changes from 1.0 to 1.1:**
+
+- **Corrected `drift_max`/`drift_min` description in §5.1:** The table now aligns with the normative per‑jitter‑point aggregation defined in §4; the misleading “and blocks” wording has been removed.
+- **Fixed the example in §9.1:** The parameters were changed to `d_lo_cont = 50`, `d_hi_cont = 60` to produce a drift of ±18, which is both mathematically correct and integer‑only.
+- **Clarified saturation range in §2:** Added an explicit sentence stating that drift is saturated to the signed 16‑bit integer range `[−32768, 32767]`.
+- **Added an informative note in §4** explaining that `drift_max` and `drift_min` are extremes across jitter offsets, not raw per‑block extremes.
+- **Versioning note:** The specification now explicitly states compatibility with GUNZ 3.67.0 and any later version that supports the `.gunzstats` format.
 
 ---
 
@@ -11,7 +23,7 @@ A positive drift means the per‑cycle advance increases over the course of a bl
 
 This metric reveals a dimension of timing behaviour that the existing metrics are blind to — the direction in which rounding decisions accumulate within a block, independent of their magnitude.  It requires no new simulation infrastructure and is computed from data the evaluator already collects.
 
-**Integration philosophy.**  Drift is stored in the extended **`.gunzstats`** companion file, not inside the map entry.  The map entry remains the standard 16‑byte structure defined in GUNZ 3.67.0 §4.2.  No custom map version is required; maps produced with drift enabled are standard GUNZ maps with `map_version = 0x0040`.  The extension is entirely in the optional statistics companion file.  Tools that require drift must read the companion statistics file; the `.gunzmap` alone does not contain this metric.
+**Integration philosophy.**  Drift is stored in the extended **`.gunzstats`** companion file, not inside the map entry.  The map entry remains the standard 16‑byte structure defined in GUNZ 3.67.0 §4.2.  No custom map version is required; maps produced with drift enabled are standard GUNZ maps with `map_version = 0x0040` (or later, as drift is compatible with any GUNZ version that supports the `.gunzstats` file format).  The extension is entirely in the optional statistics companion file.  Tools that require drift must read the companion statistics file; the `.gunzmap` alone does not contain this metric.
 
 ---
 
@@ -53,7 +65,7 @@ Equivalently, for negative numerators the tie‑breaking rule is: if the exact q
 
 All multiplications shall use **256‑bit unsigned arithmetic** to prevent overflow.  The denominator is guaranteed to be positive for `N ≥ 2`.  For `N < 2`, drift is defined as **zero**.
 
-The drift value `d` is a signed integer expressed in **ticks × 100 per cycle**.  It is **not** converted to base time units for storage; the conversion to base time units, if needed for scoring, follows the same pattern as for `advance_regularity` (§3.11 step 4 of the core specification).
+The drift value `d` is a signed integer expressed in **ticks × 100 per cycle**.  It is **not** converted to base time units for storage; the conversion to base time units, if needed for scoring, follows the same pattern as for `advance_regularity` (§3.11 step 4 of the core specification).  Before storage, the computed drift is saturated to the signed 16‑bit integer range `[−32768, 32767]`.
 
 ### 2.1 Per‑Cycle Advance Sequence (Normative)
 
@@ -141,6 +153,8 @@ where `B` is the number of blocks evaluated at that jitter offset. The mean is r
 
 All summations shall use at least **128‑bit signed** accumulation to prevent overflow. The arithmetic mean of per‑jitter‑point values uses the same signed half‑to‑even rounding convention as the per‑block mean.
 
+*(Informative)* **Aggregation scope note:** Because `d(Δ)` is the average over all blocks at a given jitter offset, `drift_max` and `drift_min` reflect the extremes *across the jitter window*, not the raw per‑block extremes. In long‑term mode, a single very large per‑block drift value is diluted by averaging before it contributes to `d(Δ)`. Users who require the absolute per‑block extremes should consult the raw `.gunzstats` file, which contains the full per‑block drift sequence.
+
 Averaging signed drift values across jitter points may result in cancellation when the drift oscillates symmetrically within the window. This is physically meaningful: a candidate whose jitter window straddles a drift reversal genuinely has no net directional bias, and a zero mean accurately reflects that. The `drift_max` and `drift_min` fields preserve the extremes, so the full excursion envelope remains available for analysis.
 
 ---
@@ -163,8 +177,8 @@ The format uses **32‑byte records** with the following layout:
 | 20 | u16 | `count_adv_lo` | Number of short advances. |
 | 22 | u16 | `count_adv_hi` | Number of long advances. |
 | 24 | s16 | `drift` | Intra‑block drift, averaged across the jitter window and measurement window (ticks × 100 per cycle).  Zero if drift is not enabled or `N < 2`. |
-| 26 | s16 | `drift_max` | Most positive (or least negative) drift value observed among all jitter points and blocks (ticks × 100 per cycle). |
-| 28 | s16 | `drift_min` | Most negative (or least positive) drift value observed among all jitter points and blocks (ticks × 100 per cycle). |
+| 26 | s16 | `drift_max` | Most positive drift value observed across the jitter window (ticks × 100 per cycle). |
+| 28 | s16 | `drift_min` | Most negative drift value observed across the jitter window (ticks × 100 per cycle). |
 | 30 | u16 | `reserved` | Reserved.  Must be written as zero by current encoders.  Decoders shall ignore this field; it is not part of the compression stream. |
 
 All time values are in the base time unit.  The number of records equals the total number of candidates evaluated.
@@ -223,15 +237,15 @@ A conformant GUNZ‑DRIFT implementation must:
 - Compute drift using the exact least‑squares formula defined in §2, with 256‑bit intermediates for `sum_a`, `sum_ia`, `num`, and `den`.
 - Use a 128‑bit signed accumulator for the long‑term mode and jitter‑window aggregation (§4).
 - Apply half‑to‑even rounding to the final division, using the signed rounding convention specified in §2.
+- Saturate the drift result to the signed 16‑bit integer range `[−32768, 32767]` before storage.
 - Produce the per‑cycle advance sequence using the placement algorithm of §2.1, with the initial error `E` derived from `rem = (N * T) % quantum` as specified, using the unrounded continuous block time `P = N * T`.
 - For each candidate frequency, compute per‑block drift values at every valid jitter offset, aggregate per‑jitter‑point values in long‑term mode as the arithmetic mean, and then aggregate per‑jitter‑point values across all valid jitter points as the arithmetic mean (`drift`), maximum (`drift_max`), and minimum (`drift_min`), using at least 128‑bit signed accumulation and the signed half‑to‑even rounding convention of §2.
-- Saturate the drift result to a signed 16‑bit integer before storage.
 - Produce bit‑identical drift values for identical inputs.
 - Emit the `.gunzstats` file with magic `0x475A4C02` and the 8‑byte header (`magic` + `candidate_count`) followed by 32‑byte records when drift is computed, for any scan mode.
 - Reject any `.gunzstats` file whose magic is not `0x475A4C02` with `GUNZ_MALFORMED_BYTECODE`.
 - Reject any `.gunzstatz` file whose magic is not `0x475A4C03` with `GUNZ_MALFORMED_BYTECODE`.
 - Record `drift_enabled = true` in `.gunzmeta`.
-- Compute `drift_max` as the maximum drift value across all jitter points and blocks, and `drift_min` as the minimum drift value across all jitter points and blocks (both signed, preserving original sign).
+- Compute `drift_max` as the maximum drift value across all jitter points, and `drift_min` as the minimum drift value across all jitter points (both signed, preserving original sign). The values are derived from the per‑jitter‑point averages `d(Δ)`, not raw per‑block values.
 - If producing compressed `.gunzstatz`, write the magic `0x475A4C03` as the first four bytes.  Reject any `.gunzstatz` file with a different magic.
 
 Support for GUNZ‑DRIFT is **optional** for GUNZ 3.67.0 conformance.  Implementations that do not support the drift extension shall write zero in the `drift`, `drift_max`, and `drift_min` fields and set `drift_enabled = false` (or omit the field) in `.gunzmeta`.  The `.gunzstats` file format (magic `0x475A4C02`) is mandatory when statistics are emitted.
@@ -242,15 +256,15 @@ Support for GUNZ‑DRIFT is **optional** for GUNZ 3.67.0 conformance.  Impleme
 
 ### 9.1 Non‑Trivial Drift
 
-Consider two frequencies that produce identical `N = 10`, `N_hi = 3`, `d_lo_cont = 5`, `d_hi_cont = 6` (in ticks, before scaling).  Their `jitter` and `advance_regularity` are identical.  However, because `T` differs by a fraction of a quantum, the continuous remainder `rem` differs, producing different initial errors:
+Consider two frequencies that produce identical `N = 10`, `N_hi = 3`, `d_lo_cont = 50`, `d_hi_cont = 60` (in ticks, before scaling).  Their `jitter` and `advance_regularity` are identical.  However, because `T` differs by a fraction of a quantum, the continuous remainder `rem` differs, producing different initial errors:
 
-- **Case A:** `rem` is small.  `E` is small.  The Bresenham algorithm places long cycles at indices 2, 5, 8.  
-  Drift ≈ +17.3.  `drift_max = +17.3`, `drift_min = +17.3` (single‑block mode, single jitter point).
+- **Case A:** The continuous remainder leads to an initial error of 3.  The Bresenham algorithm places long cycles at indices 2, 5, 8.  
+  Drift = +18.  `drift_max = +18`, `drift_min = +18` (single‑block mode, single jitter point).
 
-- **Case B:** `rem` is large.  `E` is close to `N-1`.  The Bresenham algorithm places long cycles at indices 0, 3, 6.  
-  Drift ≈ −17.3.  `drift_max = −17.3`, `drift_min = −17.3`.
+- **Case B:** A different continuous remainder leads to an initial error of 6, placing long cycles at indices 1, 4, 7.  
+  Drift = −18.  `drift_max = −18`, `drift_min = −18`.
 
-If these two cases occur at different jitter offsets of the same candidate, the per‑jitter‑point values are `+17.3` and `−17.3`.  The per‑candidate `drift` (arithmetic mean) is zero, indicating no net directional bias, while `drift_max = +17.3` and `drift_min = −17.3` capture the full oscillation envelope.  The velocity `drift_max − drift_min = 34.6` quantifies the total directional swing within the jitter window.
+If these two cases occur at different jitter offsets of the same candidate, the per‑jitter‑point values are `+18` and `−18`.  The per‑candidate `drift` (arithmetic mean) is zero, indicating no net directional bias, while `drift_max = +18` and `drift_min = −18` capture the full oscillation envelope.  The velocity `drift_max − drift_min = 36` quantifies the total directional swing within the jitter window.
 
 ### 9.2 Zero Drift
 
@@ -258,4 +272,4 @@ When `rem = 0`, the continuous block time is an exact multiple of the quantum.  
 
 ---
 
-*GUNZ‑DRIFT 1.0 — Intra‑Block Advance Trend Metric Extension — complete.*
+*GUNZ‑DRIFT 1.1 — Intra‑Block Advance Trend Metric Extension — complete.*
