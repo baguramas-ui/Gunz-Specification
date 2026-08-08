@@ -21,7 +21,6 @@ The Calibration Hammer, the breaker of imprecise shapes.
 The Dancing Hammer, the joy in the rhythm of refinement.
 
 ---
-
 # GUNZ 3.68.0 — Graduated Underlying Navigation Zones  
 **ISA · Runtime · Library**
 
@@ -784,7 +783,7 @@ The evaluator proceeds in two phases:
    The absolute difference `|total_time - reference_block_time|` is saturated to `UINT32_MAX` and stored in `block_time_inaccuracy`. This field holds only the unsigned magnitude of the deviation; the exact `total_time` cannot be reconstructed from the map entry alone. For precise total time, consult the raw per‑candidate data in the companion `.gunzstats` file.
 
 5. **Candidate post‑processing (if a `PURE_CALL` is attached).**  
-   If the zone has an attached `PURE_CALL` (captured from the bytecode and resolved at plan‑construction time), the evaluator **SHALL** invoke the callback for each candidate immediately after the standard score has been computed.  
+   If the zone has an attached `PURE_CALL` (captured from the bytecode and resolved at plan‑construction time), the evaluator **SHALL** invoke the callback for each candidate immediately after the standard score has been computed. The callback **SHALL NOT** be invoked for candidates that were skipped because `max(adv_lo_cont, adv_hi_cont) == 0`, because `N` exceeded `MAX_N`, or because the per‑candidate `max_eval_iterations` was exhausted in long‑term mode.  Such candidates are emitted directly with saturated sentinels and `FLAG_AVOID` set, without callback involvement. 
 
    **Candidate context structure.**  The runtime allocates a buffer of exactly `output_size` bytes (as declared in the library profile for that callback) and fills it with the following fields, in little‑endian byte order:
 
@@ -806,7 +805,7 @@ The evaluator proceeds in two phases:
    – Clamp `jitter` to 255.  
    – Clamp `advance_regularity` and `peak_advance_regularity` to 65535.  
    – Ensure `flags` contains only defined bits (bits 0‑2); clear any reserved bits.  
-   – If any metric that contributes to the score was changed, **recompute the score** using the formula of Step 4 with the updated values.  
+   – If any metric that contributes to the score was changed, **recompute the score** using the formula of Step 4 with the updated values. If the callback modified any metric that contributes to the score (i.e., `block_time_inaccuracy`, `jitter`, or `advance_regularity`), the evaluator **overwrites** the `score` field in the context buffer with the recomputed score, regardless of any value the callback may have written there.  If the callback did **not** change any of those metrics, the evaluator retains the callback‑supplied `score` value (if any) and uses it directly in Phase 2.  This ensures that the stability‑width algorithm always receives a score consistent with the stored metrics.  
    – Do **not** alter the `stability_width` field at this stage; it remains zero.  
 
    If the callback returns any other status, `ExecutionPlan_Run` aborts as described in §3.7.  
