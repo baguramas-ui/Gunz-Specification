@@ -1,4 +1,4 @@
-# Appendix T — Dynamic Anchor Modulation (Tide Scan) v0.3.4
+# Appendix T — Dynamic Anchor Modulation (Tide Scan) v0.3.5
 
 *Informative appendix — optional, non‑normative. Implementations may support tide scanning as described here; if they do, they shall follow this specification to ensure deterministic output.*
 
@@ -6,6 +6,7 @@
 
 ## Version History
 
+- **v0.3.5:** Iteration‑limit enforcement now correctly sums across all zones. Error‑code consistency: tide‑configuration validation uses `GUNZ_INVALID_LIBRARY`.
 - **v0.3.4:** Phase 0 mandatory for average‑mode metric selection. Variable naming clarified: tide curve length now `N_phases`; block cycle count remains `N`. Future‑proof drift aggregation defined explicitly. Fingerprint string length prefix upgraded to `u16`. Removed undefined “Meta‑hole protocol” reference. Dewaster reminder added.
 - **v0.3.3:** Added 1‑byte length prefix for strings in fingerprint extension (hardening against future variable‑length strings). Clarified variable naming in §T.6 to avoid overloading `N`. Added recommended Phase 0 note for average‑mode metric selection.
 - **v0.3.2:** Added pre‑scan iteration‑limit enforcement. Fingerprint now uses canonical JSON for strings. Explicit curve‑element validation and string normalization added. Array length underflow (< 2) rejected. Drift aggregation note for future block‑simulation‑affecting modulation.
@@ -42,11 +43,11 @@ An example of the tide configuration that the scanner receives as input (and lat
 ```
 
 - `tide_enabled` — boolean; if absent or `false`, the scan is a standard static scan.
-- `tide_anchor` — which anchor parameter is modulated.  Currently only `"reference_block_time"` is defined; future extensions may allow `"quantum"` or `"multiplier"`.  The value of `tide_anchor` **must** be `"reference_block_time"`.  Any other value shall cause the scan to be aborted with `GUNZ_MALFORMED_BYTECODE`.  The string shall be trimmed of leading and trailing whitespace and compared **case‑sensitively**.  This ensures that the optimization described in §T.3 (reusing block‑simulation results across phases) remains valid.
-- `tide_curve` — an array of signed integers (minimum 2 entries).  Each element shall be a signed 32‑bit integer (`s32`) in the range `[−2³¹, 2³¹−1]`.  Values outside this range, or elements that are not valid integers, shall cause the scan to be aborted with `GUNZ_MALFORMED_BYTECODE`.  Each entry is the offset applied to the anchor at the corresponding modulation phase.
-- `tide_mode` — `"worst_case"` (the map entry reflects the maximum score across all phases) or `"average"` (the entry reflects the arithmetic mean of the scores across all phases).  Any value other than `"worst_case"` or `"average"` shall cause the scan to be aborted with `GUNZ_MALFORMED_BYTECODE`.  The string shall be trimmed and compared **case‑sensitively**.
+- `tide_anchor` — which anchor parameter is modulated.  Currently only `"reference_block_time"` is defined; future extensions may allow `"quantum"` or `"multiplier"`.  The value of `tide_anchor` **must** be `"reference_block_time"`.  Any other value shall cause the scan to be aborted with `GUNZ_INVALID_LIBRARY`.  The string shall be trimmed of leading and trailing whitespace and compared **case‑sensitively**.  This ensures that the optimization described in §T.3 (reusing block‑simulation results across phases) remains valid.
+- `tide_curve` — an array of signed integers (minimum 2 entries).  Each element shall be a signed 32‑bit integer (`s32`) in the range `[−2³¹, 2³¹−1]`.  Values outside this range, or elements that are not valid integers, shall cause the scan to be aborted with `GUNZ_INVALID_LIBRARY`.  Each entry is the offset applied to the anchor at the corresponding modulation phase.
+- `tide_mode` — `"worst_case"` (the map entry reflects the maximum score across all phases) or `"average"` (the entry reflects the arithmetic mean of the scores across all phases).  Any value other than `"worst_case"` or `"average"` shall cause the scan to be aborted with `GUNZ_INVALID_LIBRARY`.  The string shall be trimmed and compared **case‑sensitively**.
 
-The curve length `N_phases` shall satisfy `2 ≤ N_phases ≤ 1024`.  Larger `N_phases` gives finer phase resolution but linearly increases scan time (each candidate is evaluated `N_phases` times instead of once).  An implementation shall reject any curve with `N_phases < 2` or `N_phases > 1024` by returning `GUNZ_MALFORMED_BYTECODE`.
+The curve length `N_phases` shall satisfy `2 ≤ N_phases ≤ 1024`.  Larger `N_phases` gives finer phase resolution but linearly increases scan time (each candidate is evaluated `N_phases` times instead of once).  An implementation shall reject any curve with `N_phases < 2` or `N_phases > 1024` by returning `GUNZ_INVALID_LIBRARY`.
 
 **Validation:** Before scanning begins, the implementation shall verify that for every modulation phase `p`, the modulated anchor `A₀ + δ_p` satisfies:
 
@@ -57,7 +58,7 @@ The curve length `N_phases` shall satisfy `2 ≤ N_phases ≤ 1024`.  Larger `N_
 The addition `A₀ + δ_p` shall be performed using **64‑bit signed integer arithmetic**, with `A₀` converted to `s64` before the addition.  The result is then checked against the bounds `[0, 2³²−1]`.  If any phase would produce an anchor outside this range (i.e., negative or exceeding `UINT32_MAX`), the scan is aborted with `GUNZ_INVALID_LIBRARY`.  This ensures that the core evaluator never receives an invalid `reference_block_time`.
 
 **Iteration limit enforcement (pre‑scan).**  
-The total number of candidate evaluations in a tide scan is `N_phases × candidates(zone)`, where `candidates(zone)` is defined in §3.11 of the core GUNZ specification.  Before any evaluation begins, the implementation **shall** verify that this total does not exceed the plan’s `total_max_scan_iterations`.  If it does, the scan shall be aborted with `GUNZ_INVALID_LIBRARY`.  (The jitter‑window size does not multiply the candidate count; the core evaluator processes all jitter points internally for each candidate.)
+The total number of candidate evaluations in a tide scan is `N_phases × Σ candidates(zone_i)`, where the sum is taken over all zones in the plan.  Before any evaluation begins, the implementation **shall** verify that this total does not exceed the plan’s `total_max_scan_iterations`.  If it does, the scan shall be aborted with `GUNZ_INVALID_LIBRARY`.  The core global‑iteration‑limit pre‑pass (§3.11) shall be applied with each zone’s effective candidate count multiplied by `N_phases`, and each phase shall be counted as one candidate evaluation.  (The jitter‑window size does not multiply the candidate count; the core evaluator processes all jitter points internally for each candidate.)
 
 ---
 
@@ -146,4 +147,4 @@ A scanner that does not support tide modulation **shall** reject any scan reques
 
 ---
 
-*End of Appendix T v0.3.4.*
+*End of Appendix T v0.3.5.*
