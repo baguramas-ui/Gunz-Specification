@@ -1,6 +1,16 @@
-# Appendix T — Dynamic Anchor Modulation (Tide Scan) v0.2.6
+# Appendix T — Dynamic Anchor Modulation (Tide Scan) v0.3.4
 
 *Informative appendix — optional, non‑normative. Implementations may support tide scanning as described here; if they do, they shall follow this specification to ensure deterministic output.*
+
+---
+
+## Version History
+
+- **v0.3.4:** Phase 0 mandatory for average‑mode metric selection. Variable naming clarified: tide curve length now `N_phases`; block cycle count remains `N`. Future‑proof drift aggregation defined explicitly. Fingerprint string length prefix upgraded to `u16`. Removed undefined “Meta‑hole protocol” reference. Dewaster reminder added.
+- **v0.3.3:** Added 1‑byte length prefix for strings in fingerprint extension (hardening against future variable‑length strings). Clarified variable naming in §T.6 to avoid overloading `N`. Added recommended Phase 0 note for average‑mode metric selection.
+- **v0.3.2:** Added pre‑scan iteration‑limit enforcement. Fingerprint now uses canonical JSON for strings. Explicit curve‑element validation and string normalization added. Array length underflow (< 2) rejected. Drift aggregation note for future block‑simulation‑affecting modulation.
+- **v0.3.1:** Corrected iteration‑limit formula (removed extraneous jitter‑window factor). Documented design note about jitter‑window independence.
+- **v0.3.0:** Initial stable version with five patches (stability‑width handling, undefined reference removal, fingerprint ordering, etc.).
 
 ---
 
@@ -16,7 +26,7 @@ The result is a **tide‑compensated resonance map**: it shows which operating p
 
 ## T.2 Modulation Curve
 
-A modulation curve is an ordered list of `N` anchor offsets `δ₀, δ₁, …, δ_{N-1}`.  Each offset is a signed 32‑bit integer (`s32`) expressed in the same base‑time units as the modulated anchor (typically `reference_block_time`).  The curve is cyclic: after `δ_{N-1}`, the scanner wraps back to `δ₀`.
+A modulation curve is an ordered list of `N_phases` anchor offsets `δ₀, δ₁, …, δ_{N_phases-1}`.  Each offset is a signed 32‑bit integer (`s32`) expressed in the same base‑time units as the modulated anchor (typically `reference_block_time`).  The curve is cyclic: after `δ_{N_phases-1}`, the scanner wraps back to `δ₀`.
 
 The tide curve is supplied to the scanner as an **input parameter** — for example, via a configuration file, an API argument, or a dedicated section of the bytecode header.  After the scan completes, the scanner **shall record** the curve in the `.gunzmeta` output file (see §T.4) so that the scan can be reproduced deterministically.
 
@@ -32,11 +42,11 @@ An example of the tide configuration that the scanner receives as input (and lat
 ```
 
 - `tide_enabled` — boolean; if absent or `false`, the scan is a standard static scan.
-- `tide_anchor` — which anchor parameter is modulated.  Currently only `"reference_block_time"` is defined; future extensions may allow `"quantum"` or `"multiplier"`.  The value of `tide_anchor` **must** be `"reference_block_time"`.  Any other value shall cause the scan to be aborted with `GUNZ_MALFORMED_BYTECODE`.  This ensures that the optimization described in §T.3 (reusing block‑simulation results across phases) remains valid.
-- `tide_curve` — an array of signed integers (minimum 2 entries).  Each element shall be a signed 32‑bit integer (`s32`) in the range `[−2³¹, 2³¹−1]`.  Values outside this range shall cause the scan to be aborted with `GUNZ_MALFORMED_BYTECODE`.  Each entry is the offset applied to the anchor at the corresponding modulation phase.
-- `tide_mode` — `"worst_case"` (the map entry reflects the maximum score across all phases) or `"average"` (the entry reflects the arithmetic mean of the scores across all phases).  Any value other than `"worst_case"` or `"average"` shall cause the scan to be aborted with `GUNZ_MALFORMED_BYTECODE`.
+- `tide_anchor` — which anchor parameter is modulated.  Currently only `"reference_block_time"` is defined; future extensions may allow `"quantum"` or `"multiplier"`.  The value of `tide_anchor` **must** be `"reference_block_time"`.  Any other value shall cause the scan to be aborted with `GUNZ_MALFORMED_BYTECODE`.  The string shall be trimmed of leading and trailing whitespace and compared **case‑sensitively**.  This ensures that the optimization described in §T.3 (reusing block‑simulation results across phases) remains valid.
+- `tide_curve` — an array of signed integers (minimum 2 entries).  Each element shall be a signed 32‑bit integer (`s32`) in the range `[−2³¹, 2³¹−1]`.  Values outside this range, or elements that are not valid integers, shall cause the scan to be aborted with `GUNZ_MALFORMED_BYTECODE`.  Each entry is the offset applied to the anchor at the corresponding modulation phase.
+- `tide_mode` — `"worst_case"` (the map entry reflects the maximum score across all phases) or `"average"` (the entry reflects the arithmetic mean of the scores across all phases).  Any value other than `"worst_case"` or `"average"` shall cause the scan to be aborted with `GUNZ_MALFORMED_BYTECODE`.  The string shall be trimmed and compared **case‑sensitively**.
 
-The curve length `N` shall satisfy `2 ≤ N ≤ 1024`.  Larger `N` gives finer phase resolution but linearly increases scan time (each candidate is evaluated `N` times instead of once).  An implementation shall reject any curve with `N > 1024` by returning `GUNZ_MALFORMED_BYTECODE`.
+The curve length `N_phases` shall satisfy `2 ≤ N_phases ≤ 1024`.  Larger `N_phases` gives finer phase resolution but linearly increases scan time (each candidate is evaluated `N_phases` times instead of once).  An implementation shall reject any curve with `N_phases < 2` or `N_phases > 1024` by returning `GUNZ_MALFORMED_BYTECODE`.
 
 **Validation:** Before scanning begins, the implementation shall verify that for every modulation phase `p`, the modulated anchor `A₀ + δ_p` satisfies:
 
@@ -46,7 +56,8 @@ The curve length `N` shall satisfy `2 ≤ N ≤ 1024`.  Larger `N` gives finer p
 
 The addition `A₀ + δ_p` shall be performed using **64‑bit signed integer arithmetic**, with `A₀` converted to `s64` before the addition.  The result is then checked against the bounds `[0, 2³²−1]`.  If any phase would produce an anchor outside this range (i.e., negative or exceeding `UINT32_MAX`), the scan is aborted with `GUNZ_INVALID_LIBRARY`.  This ensures that the core evaluator never receives an invalid `reference_block_time`.
 
-**Iteration limit awareness:** The total number of evaluations per candidate in a tide scan is `N × (2R+1)`, where `R` is the effective jitter window radius.  Users should ensure that `N × (2R+1) × candidates(zone)` does not exceed the plan’s `total_max_scan_iterations`.  The implementation shall enforce the global iteration limit across all phase evaluations, counting each phase as one candidate evaluation.
+**Iteration limit enforcement (pre‑scan).**  
+The total number of candidate evaluations in a tide scan is `N_phases × candidates(zone)`, where `candidates(zone)` is defined in §3.11 of the core GUNZ specification.  Before any evaluation begins, the implementation **shall** verify that this total does not exceed the plan’s `total_max_scan_iterations`.  If it does, the scan shall be aborted with `GUNZ_INVALID_LIBRARY`.  (The jitter‑window size does not multiply the candidate count; the core evaluator processes all jitter points internally for each candidate.)
 
 ---
 
@@ -63,27 +74,27 @@ Therefore an implementation may compute the score for each modulation phase but 
 For each frequency candidate `f`:
 
 1. Let `A₀` be the nominal anchor value (from the bytecode header or plan parameters).
-2. For each modulation phase `p` from `0` to `N-1`:
+2. For each modulation phase `p` from `0` to `N_phases−1`:
    a. Set the modulated anchor to `A_p = A₀ + δ_p`.
    b. Evaluate the full single‑candidate resonance metrics (§3.11 Phase 1) using `A_p` as the truth anchor.
    c. Record the resulting score `S_p`.  The other per‑phase metrics need only be recorded once, as they are identical across all phases.
-3. After all `N` phases are evaluated:
+3. After all `N_phases` phases are evaluated:
    - Let `p_sel` be the phase that produced the aggregated score.  
      For `worst_case`: `p_sel` is the phase with the maximum score.  If multiple phases share the maximum score, the one with the **smallest index** `p` shall be selected.  This guarantees deterministic tie‑breaking across implementations.  
-     For `average`: any phase may be chosen, since all per‑phase `total_time` values are identical.
+     For `average`: **Phase 0** shall be used as `p_sel` (since all per‑phase values of the other metrics are identical, any phase may be chosen, but Phase 0 is mandatory for strict procedural determinism).
    - The candidate’s **score** is the aggregated value:
-     - `worst_case`: `score = max(S₀, …, S_{N-1})`
-     - `average`: `score = round_half_even( (S₀ + … + S_{N-1}) / N )`  
-       The sum `S₀ + … + S_{N-1}` shall be accumulated in a **128‑bit unsigned integer** (`u128`) to guarantee no overflow for any `N ≤ 1024` and any valid GUNZ score (which is bounded by `UINT64_MAX`).  The division by `N` uses half‑to‑even rounding per GUNZ 3.67.0 §4.5.1.
+     - `worst_case`: `score = max(S₀, …, S_{N_phases−1})`
+     - `average`: `score = round_half_even( (S₀ + … + S_{N_phases−1}) / N_phases )`  
+       The sum `S₀ + … + S_{N_phases−1}` shall be accumulated in a **128‑bit unsigned integer** (`u128`) to guarantee no overflow for any `N_phases ≤ 1024` and any valid GUNZ score (which is bounded by `UINT64_MAX`).  The division by `N_phases` uses half‑to‑even rounding per GUNZ 3.68.0 §4.5.1.
    - The candidate’s `block_time_inaccuracy` is computed **against the nominal anchor `A₀`**, using the `total_time` from any single evaluation phase:
      ```
      block_time_inaccuracy = | total_time − A₀ |
      ```
-   - For all other map‑entry fields (`jitter`, `advance_regularity`, `peak_advance_regularity`, `stability_width`, `flags`):
+   - For all other map‑entry fields (`jitter`, `advance_regularity`, `peak_advance_regularity`, `flags`):
      - `worst_case`: use the values from phase `p_sel`.
-     - `average`: use the values from any single evaluation phase.  
+     - `average`: **shall** use the values from Phase 0.  
        *Because the anchor does not affect the block simulation, all per‑phase values of these metrics are identical; the arithmetic mean therefore equals the common value.*
-   - The **S³ score** (§4.7) shall be computed using the component metrics from any single evaluation phase, since all per‑phase values are identical.  No aggregation across phases is required.
+   - The `stability_width` field is **not** taken from any single phase; it is computed during Phase 2 using the aggregated score (the `worst_case` or `average` value) as defined in the standard GUNZ evaluator.
 
 4. The candidate is then processed as usual: score comparison, stability‑width computation, and consolidation.
 
@@ -106,12 +117,13 @@ A tide scan shall record the following additional keys in the `.gunzmeta` file:
 
 The `plan_parameters` section of the metadata shall record the **nominal** anchor value (before modulation).  The tide curve itself is the complete description of the perturbation.
 
-**Fingerprint inclusion:** The tide parameters shall be included in the map’s XXH3‑128 fingerprint.  The fingerprint input shall be extended with:
-- The `tide_anchor` string as UTF‑8 bytes.
-- The `tide_mode` string as UTF‑8 bytes.
-- The `tide_curve` array, each element represented as a little‑endian `s32` (4 bytes), concatenated in order.
+**Fingerprint inclusion:** When `tide_enabled` is `true`, the tide parameters shall be included in the map’s XXH3‑128 fingerprint.  The standard fingerprint input (defined in §4.3) is extended by **appending** the following bytes in order, after the `step_freq_overflow` byte (offset 31) and after the optional 4‑byte step‑size extension when `step_freq_overflow` is set:
 
-This guarantees that any change to the tide parameters produces a distinct map fingerprint, preserving deduplication and identity.
+1. A **2‑byte length prefix** (`u16`, little‑endian) giving the length in bytes of the `tide_anchor` string, followed by the `tide_anchor` string itself, encoded as **canonical JSON** (RFC 8785) — i.e., with no surrounding whitespace, no trailing newline — as UTF‑8 bytes.
+2. A **2‑byte length prefix** (`u16`, little‑endian) giving the length in bytes of the `tide_mode` string, followed by the `tide_mode` string, also canonical JSON as UTF‑8 bytes.
+3. The `tide_curve` array, each element represented as a little‑endian `s32` (4 bytes), concatenated in order.
+
+The length prefix ensures that future extensions that allow longer or variable‑length strings do not create ambiguity in the fingerprint input.  Using canonical JSON for the two strings guarantees that any configuration file that represents them in an equivalent JSON form (e.g., with extra whitespace or different Unicode escaping) will produce identical fingerprint bytes after canonicalisation.  This preserves backward compatibility and guarantees identical fingerprints across implementations.
 
 ---
 
@@ -126,10 +138,12 @@ A scanner that does not support tide modulation **shall** reject any scan reques
 ## T.6 Relationship to Other Features
 
 - **Jitter window:** The jitter window perturbs the **frequency** locally to measure jitter.  The tide curve perturbs the **anchor** globally to measure robustness under external modulation.  Both can be active simultaneously; their effects are independent.
-- **Drift:**  Drift is independent of `reference_block_time`.  The per‑cycle advance sequence depends only on `N`, `T`, `quantum`, and the placement logic, none of which are affected by the anchor.  Under tide modulation, all phases therefore produce identical drift values.  The map entry’s `drift`, `drift_max`, and `drift_min` fields shall be computed using the standard GUNZ‑DRIFT algorithm on **any single phase**; the result is identical for all phases.  No aggregation across phases is required.
-- **Dewaster:** The Dewaster can process a tide‑compensated map exactly as it would a static map.  The Efficiency Horizon and Doomfall will reflect the worst‑case or average performance across the modulation cycle.
-- **Meta‑hole protocol:** The meta‑hole protocol already sweeps the anchor statically.  A tide scan is the dynamic, periodic version of that sweep.  The two can be combined: run a meta‑hole sweep where each AUTOTUNE iteration uses a tide scan instead of a static scan.
+- **Drift:**  Drift is independent of `reference_block_time`.  The per‑cycle advance sequence depends only on the number of cycles in the block (denoted `N` in the core GUNZ evaluator), `T`, `quantum`, and the placement logic, none of which are affected by the anchor.  Under tide modulation, all phases therefore produce identical drift values.  The map entry’s `drift`, `drift_max`, and `drift_min` fields shall be computed using the standard GUNZ‑DRIFT algorithm on **any single phase**; the result is identical for all phases.  No aggregation across phases is required.
+  *If a future revision of this appendix allows modulation of a parameter that affects the block simulation, the drift values may differ between phases.  In that case, the per‑candidate drift fields shall be aggregated per `tide_mode`:*
+  - For `worst_case`, `drift`, `drift_max`, and `drift_min` are taken from the phase `p_sel` that produced the worst score (the phase selected during the score aggregation step in §T.3).  
+  - For `average`, `drift` is the arithmetic mean of the per‑phase drift values; `drift_max` is the maximum of the per‑phase `drift_max` values; `drift_min` is the minimum of the per‑phase `drift_min` values.
+- **Dewaster:** The Dewaster (see §4.6 of the core GUNZ specification) can process a tide‑compensated map exactly as it would a static map.  The Efficiency Horizon and Doomfall will reflect the worst‑case or average performance across the modulation cycle.
 
 ---
 
-*End of Appendix T v0.2.6.*
+*End of Appendix T v0.3.4.*
