@@ -1,4 +1,4 @@
-# GUNZ 3.67.0 — Performance Implementation Guide (Informative)
+# GUNZ 3.80.0 — Performance Implementation Guide (Informative)
 
 *How to build a high‑performance, conformant GUNZ dense scanner — safely and deterministically.*
 
@@ -19,21 +19,20 @@ The techniques described in this guide can accelerate the dense scanner by **10�
 
 ---
 
-## 3. What’s changed in 3.67.0 — impact on performance
+## 3. What’s changed in 3.80.0 — impact on performance
 
-The 3.67.0 specification introduces several refinements over the 3.35.0 baseline. Here are the changes most relevant to performance‑oriented implementers:
+The 3.80.0 specification is an evolution of the 3.67.0 foundation. Core arithmetic is unchanged; the performance‑relevant changes are:
 
 | Change | Impact |
 |--------|--------|
-| **`step_freq_overflow` replaces sentinel `0xFFFF`** | Byte 31 of the map header is now a dedicated overflow flag. When set, a 4‑byte `u32` extension follows the header with the full step size. Maps are fully self‑describing without an external `.gunzmeta` file. The old `0xFFFF` sentinel is removed. |
-| **`advance_regularity_weight` and `jitter_weight` in map header** | Now mandatory fields (bytes 8‑9). Always stored as resolved effective weights in 1‑255. Decoders must reject maps with zero weights. No performance impact. |
-| **`stability_mapping_flag` required** | Byte 15 must be `1`. Decoders reject other values. No performance impact. |
-| **`long_term_scan` in map header** | Byte 30 is the sole authoritative source for long‑term scan mode. No per‑entry flag exists. |
-| **`reference_source = 3` retained** | For maps produced without scanning (`reference_block_time = 0`). |
-| **Drift extension now 32‑byte records** | `.gunzstats` uses 32‑byte records with magic `0x475A4C02` (raw) and `0x475A4C03` (compressed). Drift fields at offsets 24‑28. |
-| **`map_version = 0x0040`** | All 3.67.x maps carry this version. Bytecode version is `0x00030043`. |
-| **Jitter‑window scope for drift** | Drift is now computed at every valid jitter offset and aggregated into per‑candidate `drift`, `drift_max`, and `drift_min`. |
-| **Core arithmetic unchanged** | The evaluator's integer operations, bit‑width requirements, and scoring formulas are identical to 3.35.0. |
+| **Map version `0x004D`** | All 3.80.x maps carry this version. Bytecode version is `0x00030050`. |
+| **96‑byte `.gunzstats` records** | Raw statistics now use 96‑byte records (magic `0x475A4C04`, compressed `0x475A4C05`) with additional fields for total block‑time sums and per‑candidate advance regularity. Storage size increases, but scanner hot path unaffected. |
+| **`sparse_map` flag in `.gunzmeta`** | The sparse‑map flag is now stored in the metadata file. The map file itself remains self‑contained; no parsing change for the scanner. |
+| **Reference‑time guessing improved** | The fallback now tries `freq_low` and `freq_high` after the midpoint, and rejects `total_time > UINT32_MAX` at each step. Plan construction may need to retry the block simulation, but this is off the hot path. |
+| **Fingerprint completeness** | The XXH3‑128 fingerprint continues to include `step_freq_overflow` and the optional extension; no change from 3.67.0. |
+| **Core arithmetic unchanged** | The evaluator’s integer operations, bit‑width requirements, scoring formulas, and stability‑width algorithm are identical to 3.67.0. |
+
+All plateau‑jump and cache‑filling techniques described below are fully conformant with GUNZ 3.80.0.
 
 ---
 
@@ -52,7 +51,7 @@ When a candidate is near `freq = 1`, some offsets would be non‑positive; those
 
 ## 5. The landscape of conformant optimisations
 
-All techniques below are safe and conformant with **GUNZ 3.67.0**.
+All techniques below are safe and conformant with **GUNZ 3.80.0**.
 
 | Rank | Technique | Typical Speed‑up | Section |
 |------|-----------|------------------|---------|
@@ -192,10 +191,10 @@ Floating‑point rounding is platform‑dependent and non‑deterministic. All a
 As the companion anti‑spec `GUNZ‑UNSOLVE` illustrates in detail, skipping the enumeration of `N_hi` integer‑crossing points (or `N * T / quantum` boundaries) leads to maps that are **grossly inaccurate**. The only safe way to avoid a full step‑by‑step scan is the window‑aware plateau‑jump described in this guide.
 
 ### 6.6 Treating `step_freq == 0` as an overflow sentinel
-In 3.67.0, `step_freq == 0` means the default step size of **1**. The overflow mechanism is the dedicated `step_freq_overflow` flag at byte 31. When set, a 4‑byte `u32` extension follows the header with the full step size. The old `0xFFFF` sentinel is removed.
+In 3.80.0, `step_freq == 0` means the default step size of **1**. The overflow mechanism is the dedicated `step_freq_overflow` flag at byte 31. When set, a 4‑byte `u32` extension follows the header with the full step size. This is unchanged from 3.67.0.
 
 ### 6.7 Omitting `step_freq` from the fingerprint
-The XXH3‑128 fingerprint list now includes `step_freq` (bytes 10‑11) and `step_freq_overflow` (byte 31), plus the 4‑byte extension when the overflow flag is set. Implementations that omit these will produce a different fingerprint and break deduplication.
+The XXH3‑128 fingerprint list includes `step_freq` (bytes 10‑11) and `step_freq_overflow` (byte 31), plus the 4‑byte extension when the overflow flag is set. Implementations that omit these will produce a different fingerprint and break deduplication.
 
 ### 6.8 Hard‑coding a specific `MAX_STATIC_EVALUATORS` value
 The spec requires at least 65,536 evaluator blocks. Implementations may support more. Do not hard‑code a fixed cap lower than the implementation can handle.
@@ -259,14 +258,14 @@ The transition frequencies can be computed in closed form using integer arithmet
 4. **Phase 3 — Map emission**
    - Apply run‑length consolidation. When a split occurs due to overflow, the first piece keeps its original `freq_delta_start`; subsequent pieces set it to `0`.
    - Long‑jump entries: emit sentinel `run_length == 0 && block_time_inaccuracy == 0`; fill bytes 8‑15 with the `s64` gap. No individual field within that range is interpreted separately.
-   - Sparse merging: accumulate omitted run lengths into the next emitted entry’s `freq_delta_start`; if the accumulated offset would exceed 32767, emit a long‑jump entry and reset the accumulator.
+   - Sparse merging: accumulate omitted run lengths into the next emitted entry’s `freq_delta_start`; if the accumulated offset would exceed 32767, emit a long‑jump entry and reset the accumulator. The accumulator must use a 128‑bit integer to prevent overflow in extremely large sparse maps.
    - Write `step_freq` into bytes 10‑11 of the map header. Write `step_freq_overflow` into byte 31. If the effective step size exceeds 65535, set `step_freq_overflow = 1`, write `0` in the `step_freq` u16 field, and place the full 32‑bit step size as a little‑endian `u32` extension immediately after the header.
    - Compute the XXH3‑64 checksum over the entries.
    - Include `step_freq` (bytes 10‑11), `step_freq_overflow` (byte 31), and the 4‑byte extension (when `step_freq_overflow = 1`) in the XXH3‑128 fingerprint as specified in §4.3 of the core specification.
 
 ---
 
-## 9. Implementation checklist for 3.67.0
+## 9. Implementation checklist for 3.80.0
 
 | Item | Check |
 |------|-------|
@@ -286,16 +285,17 @@ The transition frequencies can be computed in closed form using integer arithmet
 | `reference_source = 3` for maps without scanning | ☐ |
 | `step_freq` written to header (bytes 10‑11); `step_freq_overflow` at byte 31 | ☐ |
 | `step_freq_overflow` extension written when needed (4‑byte `u32` after header) | ☐ |
-| Map version `0x0040`; bytecode version `0x00030043` | ☐ |
+| Map version `0x004D`; bytecode version `0x00030050` | ☐ |
 | `advance_regularity_weight` and `jitter_weight` (bytes 8‑9) always 1‑255 | ☐ |
 | `stability_mapping_flag` (byte 15) set to `1` | ☐ |
 | `step_freq`, `step_freq_overflow`, and extension included in XXH3‑128 fingerprint | ☐ |
 | Run‑length overflow split: first piece keeps original `freq_delta_start`; subsequent piece(s) `freq_delta_start = 0` | ☐ |
-| Sparse accumulator overflow → emit long‑jump entry | ☐ |
+| Sparse accumulator overflow → emit long‑jump entry; use 128‑bit accumulator | ☐ |
 | Zones (including `SKIP_ZONE`) strictly disjoint; overlapping rejected | ☐ |
 | `JOIN` compatibility checks include `map_type` and detriment thresholds | ☐ |
 | `ADVANCE` validated non‑zero for both numerator and denominator | ☐ |
 | `LOOP` bounds‑check performed | ☐ |
+| 96‑byte `.gunzstats` record (magic `0x475A4C04`, compressed `0x475A4C05`) when statistics are emitted | ☐ |
 
 ---
 
@@ -319,6 +319,8 @@ The transition frequencies can be computed in closed form using integer arithmet
 | Writing zero weights in map header | `jitter_weight` and `advance_regularity_weight` must be 1‑255. |
 | Setting `stability_mapping_flag` to anything other than `1` | Map will be rejected by conformant decoders. |
 | Using `long_term_scan` as a per‑entry flag | It is a header‑only field (byte 30). |
+| Emitting statistics with incorrect record size or magic | Use 96‑byte records with `0x475A4C04` (raw) or `0x475A4C05` (compressed). |
+| Using the raw block‑time sums for jitter in Dewaster | The Dewaster uses `sum_total_block_time` and `sum_total_block_time_sq` for jitter; the raw sums are preserved for other tools. |
 
 ---
 
@@ -326,8 +328,8 @@ The transition frequencies can be computed in closed form using integer arithmet
 
 The window‑aware plateau‑jump, plateau‑based cache filling, and the correction of the half‑to‑even rounding oversight are the direct result of rigorous community review. Special thanks to the reviewers who caught the fatal flaw in the original plateau‑jump description and insisted on mathematical rigour. This guide is stronger because of that scrutiny.
 
-The refinements up to 3.67.0 — the `step_freq_overflow` mechanism, the mandatory weight fields, the `stability_mapping_flag`, the drift extension updates, and the fingerprint completeness — also emerged from the same iterative review process.
+The refinements up to 3.80.0 — the 96‑byte statistics format, the sparse‑map flag relocation, the improved reference‑time guessing, and the comprehensive Dewaster companion — also emerged from the same iterative review process.
 
 ---
 
-*GUNZ 3.67.0 — Performance Implementation Guide — end.*
+*GUNZ 3.80.0 — Performance Implementation Guide — end.*
