@@ -1,5 +1,5 @@
 
-# GUNZ 3.67.0 — Lexical Dictionary for Beginners
+# GUNZ 3.80.0 — Lexical Dictionary for Beginners
 
 *These definitions assume no engineering background. They are not normative—they are here purely to help you read the spec and guides without getting lost in jargon.*
 
@@ -94,7 +94,7 @@ The fundamental unit of a GUNZ resonance map. Each entry describes a consecutive
 *See also:* Run‑length, Long‑jump Entry.
 
 **Map Version (`map_version`)**  
-A number identifying which revision of the map format is being used. GUNZ 3.67.0 maps use `0x0040`. Decoders **must reject** maps with an unknown version—this prevents accidental misinterpretation of future formats.  
+A number identifying which revision of the map format is being used. GUNZ 3.80.0 maps use `0x004B`. Decoders **must reject** maps with an unknown version—this prevents accidental misinterpretation of future formats.  
 *See also:* Conformance.
 
 **Run‑length**  
@@ -219,7 +219,7 @@ Global iteration limit across **all zones** in a plan (default ≥ 67 108 86
 *See also:* Plan Construction, `max_scan_iterations`.
 
 **`window_duration`**  
-The total measurement window (in base time units) for long‑term scans. The evaluator accumulates statistics until cumulative block time reaches or exceeds this value. Normative maximum: 2³² − 1 base‑time units.  
+The total measurement window (in base time units) for long‑term scans. The evaluator accumulates statistics until cumulative block time reaches or exceeds this value. Normative maximum: 2⁶⁴ − 1 base‑time units.  
 *See also:* Long‑term Scan, `max_eval_iterations`.
 
 ---
@@ -227,7 +227,7 @@ The total measurement window (in base time units) for long‑term scans. The eva
 ## Bytecode & Orchestration
 
 **Bytecode / ISA / Opcode**  
-The low‑level instruction language that GUNZ uses to describe a scan. The **ISA** (Instruction Set Architecture) is the complete set of instructions. An **opcode** is the part of an instruction that specifies which operation to perform. You don’t need to write bytecode yourself; an AI, a library, or a tool can generate it. If you’re using the Minimal Profile, you can ignore these entirely. In 3.67.0, the bytecode version is fixed to `0x00030043`; exact version matching is required.  
+The low‑level instruction language that GUNZ uses to describe a scan. The **ISA** (Instruction Set Architecture) is the complete set of instructions. An **opcode** is the part of an instruction that specifies which operation to perform. You don’t need to write bytecode yourself; an AI, a library, or a tool can generate it. If you’re using the Minimal Profile, you can ignore these entirely. In 3.80.0, the bytecode version is fixed to `0x0003004E`; exact version matching is required.  
 *See also:* Minimal Profile, Lane.
 
 **Fuel**  
@@ -344,7 +344,7 @@ The combined metric that GUNZ uses to rank frequency candidates:
 ```
 score = |total_time - reference_block_time| + jitter_weight * jitter + advance_regularity_weight * advance_regularity_btu
 ```
-A lower score is better. The weights allow users to prioritise different aspects of system behaviour. The score computation uses 128‑bit unsigned arithmetic and is saturated to `UINT64_MAX`.  
+A lower score is better. The weights allow users to prioritise different aspects of system behaviour. The score computation uses integer arithmetic (up to 256‑bit) and is saturated to `UINT64_MAX`.  
 *See also:* Jitter Weight, Advance Regularity Weight, Resonance.
 
 **Truth Anchor**  
@@ -402,4 +402,4 @@ A family of very fast, non‑cryptographic hash functions. GUNZ uses XXH3‑64 f
 
 ---
 
-*If a term is missing, check the full GUNZ 3.67.0 specification or the companion philosophy document. This lexicon is a living helper, not a normative standard.*
+*If a term is missing, check the full GUNZ 3.80.0 specification or the companion philosophy document. This lexicon is a living helper, not a normative standard.*
