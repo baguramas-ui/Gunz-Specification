@@ -1,10 +1,11 @@
-# GUNZ 3.67.0 — Normative Bit‑Width Requirements  
+# GUNZ 3.80.1 — Normative Bit‑Width Requirements  
 **Companion Reference**
-*This is a non‑normative companion to GUNZ 3.67.0, provided for implementer convenience. The authoritative requirements are in §3.11 and §4.5.3 of the main specification.*
+
+*This is a non‑normative companion to GUNZ 3.80.1.  It reflects the **reduced** 128‑bit requirement for the numerator of `advance_regularity_btu`, as mandated by the 3.80.1 specification.  All other requirements remain identical to GUNZ 3.80.0.*
 
 ---
 
-The required bit‑widths are not arbitrary; they are the **smallest widths that are mathematically safe for all valid parameter combinations**.  I will show why each "large" requirement is necessary, so you can see that none of them are over‑estimates.
+The required bit‑widths are not arbitrary; they are the **smallest widths that are mathematically safe for all valid parameter combinations**.  We show why each “large” requirement is necessary.
 
 ---
 
@@ -14,9 +15,13 @@ The one exception is the **standard deviation accumulation width relaxation** de
 
 For all other operations, there is no relaxation.  The listed bit‑widths are mandatory.
 
-Below is the complete, verified bit‑width requirements table for GUNZ 3.67.0, including every operation that carries an explicit normative width.  The table consolidates requirements from §3.11 and §4.5.3; no entry is new or speculative.
+---
 
-GUNZ 3.67.0 introduces several new features — `advance_regularity_weight` and `jitter_weight` in the map header (always resolved to 1‑255), the `stability_mapping_flag`, the `step_freq_overflow` mechanism at byte 31 with a 4‑byte extension, `long_term_scan` as a header field, and the full companion ecosystem (DEWASTER, ORACLE, DRIFT, ROSETTA, PERSONA). **None of these additions change the core arithmetic or the bit‑width requirements.** The evaluator's integer operations remain identical to those in GUNZ 3.60.0; the new features are either header fields, companion tools, or metadata that do not participate in the hot‑path arithmetic.
+### What changed in GUNZ 3.80.1
+
+In GUNZ 3.80.0 (and earlier 3.75.0), the numerator of `advance_regularity_btu` required **256‑bit** arithmetic.  Subsequent analysis showed that **128‑bit** is sufficient for the product across the entire valid parameter space.  The requirement has been reduced to 128‑bit.
+
+All other arithmetic widths remain unchanged.
 
 ---
 
@@ -33,19 +38,18 @@ GUNZ 3.67.0 introduces several new features — `advance_regularity_weight` an
 | Block time (DELTA override) | **128‑bit** | `((N−N_hi)×d_lo_ov + N_hi×d_hi_ov) × quantum`; worst‑case ≈ 7.7×10²⁸. |
 | `(hold_cycles + sep_cycles) × T` | **128‑bit** | Max ≈ 5.1×10¹⁹. |
 | `total_time`, `|total_time − reference_block_time|` | **128‑bit** | Computed with 128‑bit arithmetic; result saturated to `UINT32_MAX` for storage. |
-| Score computation | **128‑bit** | All three terms are in base‑time units; saturated to `UINT64_MAX` after computation. |
-| `advance_regularity_btu` | **128‑bit** | `(adv_regularity × mult_den × quantum) / (mult_num × 100)`, worst‑case ≈ 1.2×10²⁴. |
+| **Score computation** | **128‑bit** | The sum of the three score terms (each ≤ UINT32_MAX or smaller) fits comfortably in 128‑bit. |
+| **`advance_regularity_btu`** | **128‑bit numerator** | `(adv_regularity × mult_den × quantum) / (mult_num × 100)`. The product never exceeds ~3.96×10³⁰, well below 2¹²⁸.  (Previously over‑specified as 256‑bit.) |
 | Sum `S = Σ xᵢ` (standard deviation) | **128‑bit** | For `n ≤ 2⁶⁴` and `xᵢ ≤ 2⁶⁴`, the sum fits in 128‑bit. |
 | Sum of squares `S2 = Σ (xᵢ)²` (standard deviation) | **256‑bit** | Each `xᵢ²` can be up to 2¹²⁸; the sum may exceed 2¹²⁸, requiring 256‑bit. |
 | Variance numerator `V = n·S2 − S²` (standard deviation) | **256‑bit** | Both `n·S2` and `S²` are 256‑bit quantities. |
 | Variance division `V / n²` (standard deviation) | **256‑bit numerator** | The division must handle a 256‑bit numerator; the result (`var`) is at most 2¹²⁸. |
 | Integer square root `isqrt_rounded(var)` (standard deviation) | **128‑bit input** | The input `var` is at most 2¹²⁸; the output is at most 2⁶⁴. |
+| Sparse‑map accumulator (§4.2) | **128‑bit signed (`s128`)** | Accumulates `run_length × step_freq` over many omitted intervals.  `run_length` ≤ 65535, `step_freq` ≤ 2³²−1 → product ≤ 2⁴⁸ per interval; many intervals can sum beyond 2⁶³−1. |
+| Long‑term cumulative block time (§3.11 step 3) | **128‑bit unsigned** | In long‑term mode, the sum of block times (excluding hold/sep) is compared against `window_duration` (≤ 2⁶⁴−1).  A 64‑bit accumulator would overflow. |
+| Ceiling division for `max_eval_iterations` (§3.4.2) | **128‑bit for `a + b - 1`** | When computing `ceil(window_duration / T_min)`, the addition `window_duration + T_min - 1` must be done with 128‑bit to avoid overflow (both operands can be up to 2⁶⁴−1). |
 
 **Implementers must not use narrower arithmetic than stated here.**  Wider arithmetic is always permitted.  The requirements apply to all profiles and all valid parameter combinations.
-
----
-
-*Note: This table collects requirements already present in §3.11 and §4.5.3; it introduces no new constraints. The companion specifications (DEWASTER, ORACLE, DRIFT, PERSONA, HOLEISM) may impose their own additional bit‑width requirements; consult each companion's normative sections.*
 
 ---
 
@@ -75,10 +79,32 @@ GUNZ 3.67.0 introduces several new features — `advance_regularity_weight` an
 
 ---
 
+### Why 128‑bit is sufficient for `advance_regularity_btu` (updated)
+
+The product is `advance_regularity × mult_den × quantum`.  We bound each factor:
+
+- **`advance_regularity`** – the per‑jitter‑point population standard deviation of the two per‑cycle advance values `a = 100 × adv_lo_cont` and `b = 100 × adv_hi_cont`.  For a two‑valued multiset, the standard deviation is at most **|a − b| / 2**.  The difference `|a − b| = 100 × |adv_hi_cont − adv_lo_cont|`.  
+  Now `adv_hi_cont − adv_lo_cont = ((d_lo_cont+1) × mult_num / mult_den) − (d_lo_cont × mult_num / mult_den)` which, after integer floor operations, is bounded by `mult_num` when `mult_den = 1`.  With `mult_num ≤ 2³²−1`, the largest possible difference is `2³²−1` ticks.  Thus  
+  `advance_regularity_max ≤ 100 × (2³²−1) / 2 ≈ 2.15 × 10¹¹` ticks×100.
+
+- **`mult_den`** – a `u32`, maximum `2³²−1 ≈ 4.29 × 10⁹`.
+
+- **`quantum`** – a `u32`, maximum `2³²−1 ≈ 4.29 × 10⁹`.
+
+Their product is bounded by:
+
+\[
+2.15 \times 10^{11} \times (4.29 \times 10^9)^2 \approx 3.96 \times 10^{30}.
+\]
+
+This value is **comfortably below `2¹²⁸`** (≈ 3.4 × 10³⁸).  Therefore **128‑bit arithmetic is entirely safe** for the numerator.  The previous 256‑bit requirement (introduced in GUNZ 3.75.0) was a conservative over‑estimate; it has been reduced to 128‑bit in GUNZ 3.80.1.
+
+---
+
 ### Why 256‑bit for sum of squares (`S2`) and variance numerator (`V`)
 
-- The per‑cycle advance values, scaled by 100, can be as large as **≈ 4.3 × 10²²**.  
-- Squaring such a value gives ≈ 1.8 × 10⁴⁵, which **far exceeds `2¹²⁸`** (≈ 3.4 × 10³⁸).  
+- The per‑cycle advance values, scaled by 100, can be as large as **≈ 4.3 × 10²⁸** (worst‑case `adv_hi_cont` with large `mult_num` and small `quantum`).  
+- Squaring such a value gives ≈ 1.8 × 10⁵⁷, which **far exceeds `2¹²⁸`** (≈ 3.4 × 10³⁸).  
 - Even a modest number of samples (e.g., `n = 21` from the jitter window) can push the sum of squares beyond 2¹²⁸.  
 - Therefore 256‑bit is the **minimum** safe width for `S2` and `V`.  This is not an over‑estimate; it is required by the worst‑case inputs that the evaluator must handle.
 
@@ -88,6 +114,70 @@ GUNZ 3.67.0 introduces several new features — `advance_regularity_weight` an
 
 - The variance `var = V / n²` is at most 2¹²⁸ (since `V` fits in 256 bits and `n²` ≥ 1).  
 - The square root of a 128‑bit number can be up to 2⁶⁴, so the square‑root function must accept a 128‑bit input.  This is the smallest width that works for all legal inputs.
+
+---
+
+### Additional requirements for sparse‑map and long‑term accumulators
+
+- **Sparse‑map accumulator** – Must be a signed 128‑bit integer (`s128`).  It accumulates gaps of `run_length × step_freq`, and after many omitted intervals the sum can exceed 2⁶³−1.  The overflow‑reduction algorithm (§4.2) relies on the accumulator being wide enough to detect when it exceeds this limit.  A 64‑bit accumulator would silently wrap around, producing invalid maps.
+
+- **Long‑term cumulative block time** – Must be accumulated in an unsigned 128‑bit integer.  In long‑term mode, the evaluator repeats blocks until the total (excluding hold/sep) reaches `window_duration`, which itself can be up to 2⁶⁴−1.  A 64‑bit accumulator would overflow after just a few blocks.
+
+- **Ceiling for `max_eval_iterations`** – When computing `ceil(window_duration / T_min)`, the intermediate addition `window_duration + T_min - 1` must be performed in 128‑bit to avoid overflow, since both operands can be as large as 2⁶⁴−1.
+
+---
+
+### Beginner’s Pitfalls
+
+Even experienced programmers can stumble on these points.  Here are the most common misunderstandings:
+
+**1. Storage width ≠ computation width.**  
+Fields like `block_time_inaccuracy` are stored as `u32`, but the subtraction `|total_time − reference_block_time|` must be computed in **128‑bit** before being saturated down to 32‑bit.  Beginners often do the subtraction directly in 32‑bit, causing silent overflow.
+
+**2. Saturation vs. overflow.**  
+Saturation happens *after* the exact computation.  You must compute the value in a wide type first, then clamp it to the field width.  Computing in a narrow type that overflows first is a bug.
+
+**3. The “128‑bit for score” misunderstanding.**  
+The final score is saturated to `UINT64_MAX`, but the sum of the three score terms can be larger than 2⁶⁴.  That’s why 128‑bit is required for the sum.  Beginners sometimes think 64‑bit is enough because the stored score is only 64 bits.
+
+**4. When 256‑bit is truly mandatory.**  
+Only two places require 256‑bit: the standard deviation accumulators `S2` and `V`.  Everything else fits in 128‑bit (or less).  The `advance_regularity_btu` numerator was previously 256‑bit but has been reduced to 128‑bit in 3.80.1.
+
+**5. Signed vs. unsigned.**  
+Almost all arithmetic is unsigned.  The main exception is the sparse‑map accumulator, which is **signed** (because gaps are signed and `freq_delta_start` is an `s16`).  Using an unsigned accumulator there would break the overflow‑detection logic.
+
+---
+
+### Engineer’s Quick Reference Checklist
+
+Use this list when reviewing an implementation.  If any item is not satisfied, the output may be non‑deterministic or incorrect.
+
+- [ ] `N × T` → 128‑bit
+- [ ] `R`, `Q`, `N_hi` → 128‑bit
+- [ ] DELTA block time → 128‑bit
+- [ ] `(hold+sep) × T` → 128‑bit
+- [ ] `total_time` and subtraction → 128‑bit
+- [ ] Score sum (three terms) → 128‑bit
+- [ ] `advance_regularity_btu` numerator → 128‑bit
+- [ ] Standard deviation sums `S2`, `V` → 256‑bit (unless relaxation proven)
+- [ ] Sparse‑map accumulator → 128‑bit signed
+- [ ] Long‑term cumulative block time → 128‑bit unsigned
+- [ ] Ceiling for `max_eval_iterations` → 128‑bit for the addition
+
+---
+
+### Maximum Legal Values (Quick Reference)
+
+For engineers who want to verify their own bounds, here are the extreme legal parameter values:
+
+| Parameter | Maximum | Note |
+|-----------|---------|------|
+| `N` (cycle count) | 2³¹−1 | ≈ 2.1 × 10⁹ |
+| `T` (time_unit=12) | 10¹⁷ | base‑time units |
+| `adv_hi_cont` (scaled ×100) | **4.3 × 10²⁸** | Corrected maximum per‑cycle advance |
+| `window_duration` | 2⁶⁴−1 | base‑time units |
+| `mult_num`, `mult_den` | 2³²−1 | maximum u32 |
+| `step_freq` | 2³²−1 | maximum u32 |
 
 ---
 
@@ -104,8 +194,8 @@ For every other operation, the stated bit‑widths are the minimum safe widths a
 No.  Every width requirement can be triggered by a legal combination of parameters:
 
 - `time_unit = 12` (picoseconds)  
-- `quantum = 1`  
-- `mult_num` and `mult_den` at their maximum (2³²‑1)  
+- `quantum = 1` (or up to 2³² for the multiplicative factors)  
+- `mult_num` and `mult_den` at their maximum (2³²−1)  
 - `freq_candidate = 1` (10⁻⁵ Hz)  
 
 These settings produce the extreme numeric values used in the bounds above, so a conformant implementation must handle them.  The specified widths are exactly what is needed to guarantee correctness across the entire parameter space.
