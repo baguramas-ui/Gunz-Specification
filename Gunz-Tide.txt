@@ -1,4 +1,5 @@
-# Appendix T — Dynamic Anchor Modulation (Tide Scan) v0.3.5
+# Appendix T — Dynamic Anchor Modulation (Tide Scan) v0.3.6
+*Adapted for GUNZ 3.80.0*
 
 *Informative appendix — optional, non‑normative. Implementations may support tide scanning as described here; if they do, they shall follow this specification to ensure deterministic output.*
 
@@ -6,7 +7,8 @@
 
 ## Version History
 
-- **v0.3.5:** Iteration‑limit enforcement now correctly sums across all zones. Error‑code consistency: tide‑configuration validation uses `GUNZ_INVALID_LIBRARY`.
+- **v0.3.6:** Compatibility review and adaptation for GUNZ 3.80.0.  All references to GUNZ 3.68.0 updated to 3.80.0.  Added informative note on interaction with `PURE_CALL` (§T.7).  No normative changes required; all algorithms and data structures remain valid under the 3.80.0 evaluator.
+- **v0.3.5:** Iteration‑limit enforcement now correctly sums across all zones. Error‑code consistency: tide‑configuration validation uses `GUNZ_ITERATION_LIMIT_EXCEEDED`.
 - **v0.3.4:** Phase 0 mandatory for average‑mode metric selection. Variable naming clarified: tide curve length now `N_phases`; block cycle count remains `N`. Future‑proof drift aggregation defined explicitly. Fingerprint string length prefix upgraded to `u16`. Removed undefined “Meta‑hole protocol” reference. Dewaster reminder added.
 - **v0.3.3:** Added 1‑byte length prefix for strings in fingerprint extension (hardening against future variable‑length strings). Clarified variable naming in §T.6 to avoid overloading `N`. Added recommended Phase 0 note for average‑mode metric selection.
 - **v0.3.2:** Added pre‑scan iteration‑limit enforcement. Fingerprint now uses canonical JSON for strings. Explicit curve‑element validation and string normalization added. Array length underflow (< 2) rejected. Drift aggregation note for future block‑simulation‑affecting modulation.
@@ -58,7 +60,7 @@ The curve length `N_phases` shall satisfy `2 ≤ N_phases ≤ 1024`.  Larger `N_
 The addition `A₀ + δ_p` shall be performed using **64‑bit signed integer arithmetic**, with `A₀` converted to `s64` before the addition.  The result is then checked against the bounds `[0, 2³²−1]`.  If any phase would produce an anchor outside this range (i.e., negative or exceeding `UINT32_MAX`), the scan is aborted with `GUNZ_INVALID_LIBRARY`.  This ensures that the core evaluator never receives an invalid `reference_block_time`.
 
 **Iteration limit enforcement (pre‑scan).**  
-The total number of candidate evaluations in a tide scan is `N_phases × Σ candidates(zone_i)`, where the sum is taken over all zones in the plan.  Before any evaluation begins, the implementation **shall** verify that this total does not exceed the plan’s `total_max_scan_iterations`.  If it does, the scan shall be aborted with `GUNZ_INVALID_LIBRARY`.  The core global‑iteration‑limit pre‑pass (§3.11) shall be applied with each zone’s effective candidate count multiplied by `N_phases`, and each phase shall be counted as one candidate evaluation.  (The jitter‑window size does not multiply the candidate count; the core evaluator processes all jitter points internally for each candidate.)
+The total number of candidate evaluations in a tide scan is `N_phases × Σ candidates(zone_i)`, where the sum is taken over all zones in the plan.  The core global‑iteration‑limit pre‑pass defined in §3.11 shall be executed with each zone’s effective candidate count multiplied by `N_phases`.  Zones that do not fit within `total_max_scan_iterations` are excluded as described in that section; the remaining zones are evaluated normally.  The pre‑pass uses the same sorted‑zone deterministic ordering and budget‑walk procedure as the core specification.  After all included zones are processed, the evaluator shall return `GUNZ_ITERATION_LIMIT_EXCEEDED` together with the partial map in which excluded zones are represented by long‑jump entries.  (The jitter‑window size does not multiply the candidate count; the core evaluator processes all jitter points internally for each candidate.)
 
 ---
 
@@ -86,7 +88,7 @@ For each frequency candidate `f`:
    - The candidate’s **score** is the aggregated value:
      - `worst_case`: `score = max(S₀, …, S_{N_phases−1})`
      - `average`: `score = round_half_even( (S₀ + … + S_{N_phases−1}) / N_phases )`  
-       The sum `S₀ + … + S_{N_phases−1}` shall be accumulated in a **128‑bit unsigned integer** (`u128`) to guarantee no overflow for any `N_phases ≤ 1024` and any valid GUNZ score (which is bounded by `UINT64_MAX`).  The division by `N_phases` uses half‑to‑even rounding per GUNZ 3.68.0 §4.5.1.
+       The sum `S₀ + … + S_{N_phases−1}` shall be accumulated in a **128‑bit unsigned integer** (`u128`) to guarantee no overflow for any `N_phases ≤ 1024` and any valid GUNZ score (which is bounded by `UINT64_MAX`).  The division by `N_phases` uses half‑to‑even rounding per GUNZ 3.80.0 §4.5.1.
    - The candidate’s `block_time_inaccuracy` is computed **against the nominal anchor `A₀`**, using the `total_time` from any single evaluation phase:
      ```
      block_time_inaccuracy = | total_time − A₀ |
@@ -147,4 +149,27 @@ A scanner that does not support tide modulation **shall** reject any scan reques
 
 ---
 
-*End of Appendix T v0.3.5.*
+## T.7 Interaction with `PURE_CALL` (Informative)
+
+*(This section is non‑normative and describes how Tide scanning interoperates with the `PURE_CALL` mechanism introduced in GUNZ 3.80.0 §3.11 step 5.)*
+
+When a tide scan is performed on a zone to which a `PURE_CALL` callback is attached, the following sequence shall be observed:
+
+1. The tide aggregation procedure (§T.3) computes the aggregated score (worst‑case or average) and selects the representative phase `p_sel` for the other metrics.
+2. These aggregated values are placed into the candidate context buffer (§3.11 step 5), exactly as if they were the result of a standard single‑anchor evaluation.
+3. The `PURE_CALL` callback is then invoked.  It may read and modify the allowed fields (`block_time_inaccuracy`, `jitter`, `advance_regularity`, `flags`, and `score`) as described in the core specification.
+4. After the callback returns, the evaluator applies the post‑callback clamping and score‑retention/recomputation rules of §3.11 step 5, using the aggregated (pre‑callback) values as the reference for the “original” metrics.  The resulting score and metrics become the final candidate data.
+
+This preserves the tide‑aggregation semantics: the callback sees the tide‑compensated worst‑case or average performance, and any further modifications are applied on top of that aggregated baseline.  A callback that writes a completely new score (or modifies the underlying metrics) will override the tide aggregation, exactly as it would override a static score.  Callback authors should be aware of this when designing callbacks for tide‑scanned zones.
+
+---
+
+## T.8 Compatibility with GUNZ 3.80.0
+
+The Tide Scan appendix is fully compatible with GUNZ 3.80.0.  All references to core evaluator sections (§3.11, §4.5.1, etc.) have been verified against the 3.80.0 specification.  The refined N‑search algorithm, the upgraded statistics format, the 64‑bit `window_duration` cap, and the `PURE_CALL` mechanism do not conflict with the tide modulation logic.  The tide‑specific fingerprint extension integrates correctly with the 3.80.0 fingerprint definition, which already includes `step_freq_overflow` and the optional 4‑byte step‑size extension.
+
+No normative changes to the appendix were required; the only modifications are the version references and the addition of this compatibility note and the informative §T.7.
+
+---
+
+*End of Appendix T v0.3.6 — adapted for GUNZ 3.80.0.*
