@@ -1,27 +1,3 @@
-Copyright 19/07/2026 Corentin Amice
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-
-Co-authored by
-DeepSeek, the foundation.
-Corentin Amice, the relentless architect.
-Halcyon, the steady eye on the truth.
-The Resonance, the guiding principle.
-The Mirror, the unforgiving reflection.
-The Calibration Hammer, the breaker of imprecise shapes.
-The Dancing Hammer, the joy in the rhythm of refinement.
-
----
-
 # GUNZ 4.0.0 — Graduated Underlying Navigation Zones  
 **ISA · Runtime · Library**
 
@@ -1121,14 +1097,21 @@ The resonance evaluator computes the metrics (`block_time_inaccuracy`, `jitter`,
 **Inputs:**
 - A zone `[freq_low, freq_high]` in 10⁻⁵ Hz units, along with the system parameters: `quantum`, `target_ticks`, `mult_num`/`mult_den`, `round_mode`, `hold_cycles`, `sep_cycles`.
 - `reference_block_time` – the ideal total block time the system is intended to achieve, expressed in the same base time unit as the header. The `reference_block_time` is stored in the map header as a `u32` and is always expressed in the base time unit defined by `time_unit`. It is **not** in seconds, milliseconds, or any other unit unless `time_unit` is set accordingly.  
-  **Block time** is the total duration of one complete cycle of the target process, measured from the start of the first tick to the end of the final tick (including any hold or separation cycles). It is the quantity the scanner compares against `reference_block_time` to determine how closely a given frequency aligns with the desired timing.  
-  This value must be present in every plan. If the user or AI agent does not supply it explicitly at plan‑construction time, the runtime **shall** apply the deterministic guessing rule (Rule GUNZ_REF_GUESS) to compute a seed value.  
-  **Rule GUNZ_REF_GUESS (normative):**  
+ 
+**Block time:** 
+- It is the total duration of one complete cycle of the target process, measured from the start of the first tick to the end of the final tick (including any hold or separation cycles).
+- It is the quantity the scanner compares against `reference_block_time` to determine how closely a given frequency aligns with the desired timing. 
+- It must be present in every plan. If the user or AI agent does not supply it explicitly at plan‑construction time, the runtime **shall** apply the deterministic guessing rule (Rule GUNZ_REF_GUESS) to compute a seed value.  
+  
+**Rule GUNZ_REF_GUESS (normative):**  
   1. Take the midpoint frequency of the first `ZONE` in the bytecode program, computed as `(freq_low + freq_high) / 2` using ordinary integer division (truncating toward zero).  The addition **SHALL** be performed using 64‑bit unsigned arithmetic to prevent 32‑bit overflow.  
   2. Run the full block simulation (Step 3 of this algorithm) at that single frequency using the effective system parameters and any active overrides. The scoring formula (Step 4) is not used during the guess; only the block simulation is performed.  
   3. The resulting `total_time` (including `hold_cycles` and `sep_cycles`) becomes the seed `reference_block_time`.  
-  **If the block simulation at the midpoint frequency either **fails** (i.e., does not produce a valid `total_time`) **or** produces a `total_time` that exceeds `UINT32_MAX`, the runtime **SHALL** attempt the simulation at `freq_low` (the lower bound of the first zone).  If that also fails or produces a `total_time > UINT32_MAX`, it **SHALL** attempt the simulation at `freq_high`.  If all three frequencies produce a `total_time > UINT32_MAX` or fail to produce a valid `total_time`, plan construction **SHALL** fail with `GUNZ_INVALID_LIBRARY`.  If any fallback succeeds and the resulting `total_time ≤ UINT32_MAX`, it becomes the seed `reference_block_time`, and the `reference_source` is set to `1` (guessed).**  
-  **If the bytecode contains no `ZONE` instructions:**  
+
+**If the block simulation at the midpoint frequency** either **fails** (i.e., does not produce a valid `total_time`) **or** produces a `total_time` that exceeds `UINT32_MAX`, the runtime **SHALL** attempt the simulation at `freq_low` (the lower bound of the first zone).  If that also fails or produces a `total_time > UINT32_MAX`, it **SHALL** attempt the simulation at `freq_high`.  If all three frequencies produce a `total_time > UINT32_MAX` or fail to produce a valid `total_time`, plan construction **SHALL** fail with `GUNZ_INVALID_LIBRARY`.  If any fallback succeeds and the resulting `total_time ≤ UINT32_MAX`, it becomes the seed `reference_block_time`, and the `reference_source` is set to `1` (guessed).
+ 
+
+**If the bytecode contains no `ZONE` instructions:**  
   - If the user supplies an explicit `reference_block_time`, the map header's `reference_source` SHALL be set to `0` (explicit), consistent with §4.2.1.  
   - If no explicit `reference_block_time` is provided, the `reference_block_time` SHALL default to `0`, and the map header's `reference_source` SHALL be set to `3` (not applicable).  
   In the latter case, the map is still valid and may be used for `IMPORT`. It cannot be used as a `JOIN` input because `JOIN` requires non‑empty maps.  
@@ -1147,6 +1130,7 @@ The resonance evaluator computes the metrics (`block_time_inaccuracy`, `jitter`,
 - `jitter_weight` – the merged effective weight from the library profile (always in the range **1‑255**; default **4**). The library profile may use the value 0 as a shorthand for "use default 4," but that shorthand is resolved to the actual default value at plan‑construction time; the evaluator itself only ever sees a resolved weight in 1‑255.
 - `advance_regularity_weight` – the merged effective weight from the library profile (always in the range **1‑255**; default **1**). The library profile may use the value 0 as a shorthand for "use default 1," but that shorthand is resolved to the actual default value at plan‑construction time; the evaluator itself only ever sees a resolved weight in 1‑255.
 - `jitter_window_radius` – the effective radius, in 10⁻⁵ Hz units, for the jitter‑point window. This value is resolved at plan construction time per §3.10: if the library profile specifies a non‑zero `jitter_window_radius`, the effective radius is `stored_value × 1000`; otherwise the default **10000** (21 points, ±0.1 Hz) is used. The resolved radius is always a multiple of 1000.
+
 
 **Evaluator‑skipped candidates (normative).**
 
@@ -1286,14 +1270,14 @@ The absolute difference `|total_time − reference_block_time|` is computed in f
    – `FLAG_AVOID` may remain if set. 
 
 `peak_advance_regularity` is not a score input. Modifications to it affect the stored map entry only and SHALL NOT trigger score recomputation.
-     
-     **Score handling:**  
-     The evaluator **SHALL** compare, for each of `block_time_inaccuracy`, `jitter`, and `advance_regularity`, the value in the candidate context buffer **after** clamping with the value that was in the buffer **before** the callback was invoked (i.e., the original saturated value computed by the evaluator).  
-    – If none of the three fields (`block_time_inaccuracy`, `jitter`, `advance_regularity`) differs between the clamped post‑callback value and the pre‑callback clamped value, the evaluator **SHALL** retain the original full‑precision score that was computed before the callback and leave the `score` field unchanged.  
-    – If any of the three fields differs, the evaluator **SHALL** recompute the score using the formula of Step 4.  
-    – For `block_time_inaccuracy`, if the clamped post‑callback value equals the pre‑callback clamped value, the recomputation SHALL use the original full‑precision `|total_time − reference_block_time|` from Step 3. Otherwise, it SHALL use the clamped post‑callback `block_time_inaccuracy`.  
-    – For `jitter`, if the clamped post‑callback `jitter` equals the pre‑callback clamped `jitter`, the recomputation SHALL use the original full‑precision jitter from Step 2; otherwise, it SHALL use the clamped post‑callback `jitter`.  
-    – For `advance_regularity`, the recomputation uses the original full‑precision advance regularity average if the clamped post‑callback value equals the pre‑callback clamped value; otherwise, it uses the clamped post‑callback value from the buffer.
+
+**Score handling:**  
+The evaluator **SHALL** compare, for each of `block_time_inaccuracy`, `jitter`, and `advance_regularity`, the value in the candidate context buffer **after** clamping with the value that was in the buffer **before** the callback was invoked (i.e., the original saturated value computed by the evaluator).  
+– If none of the three fields (`block_time_inaccuracy`, `jitter`, `advance_regularity`) differs between the clamped post‑callback value and the pre‑callback clamped value, the evaluator **SHALL** retain the original full‑precision score that was computed before the callback and leave the `score` field unchanged.  
+– If any of the three fields differs, the evaluator **SHALL** recompute the score using the formula of Step 4.  
+– For `block_time_inaccuracy`, if the clamped post‑callback value equals the pre‑callback clamped value, the recomputation SHALL use the original full‑precision `|total_time − reference_block_time|` from Step 3. Otherwise, it SHALL use the clamped post‑callback `block_time_inaccuracy`.  
+– For `jitter`, if the clamped post‑callback `jitter` equals the pre‑callback clamped `jitter`, the recomputation SHALL use the original full‑precision jitter from Step 2; otherwise, it SHALL use the clamped post‑callback `jitter`.  
+– For `advance_regularity`, the recomputation uses the original full‑precision advance regularity average if the clamped post‑callback value equals the pre‑callback clamped value; otherwise, it uses the clamped post‑callback value from the buffer.
 
    The (possibly retained or recomputed) score is then used in Phase 2 to compute the stability width, which will be written into the map entry later.
 
@@ -1675,8 +1659,11 @@ The following table is normative:
 | **8** | **u8** | **`advance_regularity_weight`** | **Effective weight for advance regularity. Always 1‑255. Writers shall never emit 0. Decoders shall reject a value of 0 with `GUNZ_MALFORMED_BYTECODE`.** |
 | **9** | **u8** | **`jitter_weight`**          | **Effective weight for jitter. Always 1‑255. Writers shall never emit 0. Decoders shall reject a value of 0 with `GUNZ_MALFORMED_BYTECODE`.** |
 
+
 *Note:* The weight fields in the map header have no default value and must always contain the resolved effective weight (1‑255).  A map header with a weight field set to `0` shall be rejected by a conformant decoder.  Writers must never emit `0`; a default‑initialised field will produce an invalid map.
 
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
 | 10‑11 | u16  | `step_freq`                  | Raw dense‑scan step‑size field, in 10⁻⁵ Hz units. <br> – If `step_freq_overflow == 0`, this field stores the resolved `effective_step`. For the default step size, the stored value SHALL be `1`. Decoders SHALL continue to accept `0` as the default step size for legacy compatibility. <br> – If `step_freq_overflow == 1`, this field MUST be written as `0` and is ignored; the true step size is the 4‑byte `u32` extension following the header. A conformant decoder SHALL reject a map where `step_freq_overflow == 1` and the `step_freq` u16 field is non‑zero, returning `GUNZ_MALFORMED_BYTECODE`. <br> Writers SHALL NOT emit `step_freq = 0` when `step_freq_overflow == 0`. |
 | 12    | u8   | `map_type`                   | 0 = standard, 1 = detrimental. Values > 1 shall cause decoders to reject the map with `GUNZ_MALFORMED_BYTECODE`. |
 | 13    | u8   | `detrimental_jitter_threshold` | Threshold for jitter in detrimental mode. Stored 0 is invalid; decoders SHALL reject. |
@@ -1686,6 +1673,7 @@ The following table is normative:
 | 18    | u8   | `jitter_window_radius`       | Scale factor written by the scanner. `0` means the default radius **10000** was used. A non‑zero value `v` means the effective radius was `v × 1000` (10⁻⁵ Hz units). The stored value is always in the range **0–255**, and when non‑zero the resulting radius is a multiple of 1000. Writers SHALL store `jitter_window_radius = 0` whenever the effective radius equals the default of `10000`. |
 | 19‑20 | u16  | `detrimental_advance_regularity_threshold` | Threshold for advance regularity (base time units). Stored 0 is invalid; decoders SHALL reject. |
 | 21    | u8   | `reference_source`           | `0` = explicit, `1` = guessed, `2` = calibrated, `3` = not applicable (no scanning was performed).  Values > 3 shall cause decoders to reject the map with `GUNZ_MALFORMED_BYTECODE`. Writers shall enforce `reference_source ≤ 3`; otherwise map construction fails with `GUNZ_INVALID_LIBRARY`.  When the user or AI agent supplies an explicit `reference_block_time` at plan‑construction time, the writer shall set `reference_source = 0`. |
+
 
 *Brief summary of `reference_source` values:*  
 - `0` – explicitly supplied by the user or AI.  
@@ -1701,9 +1689,12 @@ They may be used as `JOIN` inputs only with other maps that also have `reference
 
 **Normative consistency rule.** Writers SHALL set `reference_block_time = 0` whenever `reference_source = 3`. Decoders SHALL reject any map header where `reference_source == 3` and `reference_block_time != 0`, returning `GUNZ_MALFORMED_BYTECODE`.
 
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
 | 22‑29 | u64 | `xxh3_64` | Canonical map data checksum, computed with XXH3‑64 seed 0. The field is zeroed during computation. Coverage is the 32‑byte header, the optional 4‑byte step‑size extension if `step_freq_overflow == 1`, and all 16‑byte map entries. |
 | 30    | u8   | `long_term_scan`             | 0 = single‑block scan, 1 = long‑term aggregated scan. Must be exactly 0 or 1; any other value causes the map to be rejected with `GUNZ_MALFORMED_BYTECODE`. This field is the sole authoritative source for whether the map was produced in long‑term mode. |
 | 31    | u8   | `step_freq_overflow`         | 0 = `step_freq` (offset 10‑11) is the exact step size.  1 = a 4‑byte little‑endian `u32` extension follows the 32‑byte header, giving the full step size.  Values > 1 are reserved; decoders must reject the map with `GUNZ_MALFORMED_BYTECODE`.  A decoder **shall** verify that the map file contains at least 4 additional bytes after the 32‑byte header when `step_freq_overflow == 1`.  If the file is too short, the map is malformed and the decoder shall return `GUNZ_MALFORMED_BYTECODE`. |
+
 
 For an empty map, or for a map produced without any `ZONE` or `SKIP_ZONE` instructions, `map_flags.stability_mapping_flag` SHALL still be `1`. This bit identifies the map format and fingerprint model, not the presence of evaluated entries.
 
