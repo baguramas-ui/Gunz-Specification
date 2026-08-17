@@ -416,14 +416,36 @@ The merged result for a sub‑interval is determined as follows:
   - If that gap does not exceed `max_lj_gap`, a single type‑0 long‑jump entry SHALL be emitted.
   - No normal entry SHALL be emitted for a type‑0 long‑jump placeholder.
 
-The `STAB_SATURATED` flag (bit 0) is set in the resulting entry if and only if the merged stability width is exactly **65535** and **every** evaluated contributing entry whose stored stability width is 65535 has `STAB_SATURATED` set. If any contributing evaluated entry has stored width 65535 with the flag clear, the output flag SHALL be clear. Implicit perfect entries do not contribute.
+The `STAB_SATURATED` flag (bit 0) is set in the resulting entry if and only if the merged stability width is exactly 65535 and every evaluated contributing entry whose stored stability width is 65535 has `STAB_SATURATED` set. If any contributing evaluated entry has stored width 65535 with the flag clear, the output flag SHALL be clear. Implicit perfect entries do not contribute.
 
-**Flag handling after merge.**  For sub‑intervals where both inputs contribute defined flags (i.e., neither is a long‑jump entry), the merged flags are determined as follows:  
-– `STAB_SATURATED` (bit 0) is set as described in the preceding paragraph.  
-– `FLAG_SKIPPED` (bit 2) is cleared in the merged result if one input has it set and the other does not (evaluated data supersedes the placeholder).  If both inputs have `FLAG_SKIPPED` set, the flag is retained.  
-– `FLAG_AVOID` (bit 1) is the bitwise OR of the two input flags.
-– `STAB_SATURATED` (bit 0), `FLAG_SKIPPED` (bit 2), and `FLAG_INVALID` (bit 3) are governed solely by their individual rules above and SHALL NOT be set by bitwise OR.
-– Reserved flag bits (4‑7) must be zero in both inputs; if any reserved bit is set, `JOIN` shall fail with `GUNZ_MALFORMED_BYTECODE`.  
+**Flag handling after merge.**
+
+Let the *contributing inputs* be the inputs that supply the merged data
+under the data-quality hierarchy of this section.
+
+If the merged result contains evaluated or implicit perfect data:
+
+- `FLAG_AVOID` SHALL be the bitwise OR of `FLAG_AVOID` from only those
+  contributing inputs that provide evaluated or implicit perfect data.
+  Unevaluated placeholders SHALL NOT contribute to `FLAG_AVOID`.
+- `FLAG_SKIPPED` SHALL be clear.
+- `FLAG_INVALID` SHALL be clear.
+
+If both inputs are unevaluated placeholders, the merged flags SHALL follow
+the merged placeholder type, with precedence:
+
+`FLAG_INVALID` > `FLAG_SKIPPED` > type-0 long-jump
+
+| Merged placeholder  | `FLAG_INVALID` | `FLAG_AVOID` | `FLAG_SKIPPED` |
+|---------------------|----------------|--------------|----------------|
+| `FLAG_INVALID`      | 1              | 1            | 0              |
+| `FLAG_SKIPPED`      | 0              | 0            | 1              |
+| type-0 long-jump    | 0              | 0            | 0              |
+**Because the long‑jump sentinel reinterprets bytes 8–15 as one signed 64‑bit gap, the normal flags byte at offset 9 is physically present but semantically absent; decoders must not interpret it as interval flags, and the table’s zero row denotes that absence.**
+
+`STAB_SATURATED` is never set by bitwise OR and SHALL be determined only as described in the preceding paragraph. If no evaluated contributing entries exist, `STAB_SATURATED` remains clear. For merged normal placeholders the stability width is `0`; for a merged type‑0 long‑jump, no stability width is present.
+
+Reserved flag bits (4-7) must be zero in both inputs; if any reserved bit is set, `JOIN` shall fail with `GUNZ_MALFORMED_BYTECODE`.
 
 Long‑jump entries carry no flags of their own; their presence as gaps is governed by the data‑quality hierarchy above and does not contribute to flag merging.  
 
