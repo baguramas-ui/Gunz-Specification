@@ -1443,6 +1443,23 @@ Long‑jump entries are gaps, not candidates.
 
 For every evaluator‑skipped candidate, regardless of which skip path is taken, both `FLAG_CENTRAL_ABOVE` and `FLAG_CENTRAL_BELOW` SHALL be clear on the emitted saturated‑skipped entry.
 
+
+**Central total time (normative)**
+
+For non‑long‑term scans, the central total time of a candidate is the
+single‑block `total_time` computed at jitter offset `Δ = 0`.
+
+For long‑term scans, the central total time is `total_time_lt`, the
+half‑to‑even integer mean of the per‑block `total_time_i` at jitter offset
+`Δ = 0`.
+
+Central total time SHALL be used for:
+- central‑direction flags,
+- Phase 2 stability plateaus.
+
+It SHALL NOT be derived from, or replaced by, the saturated `block_time_inaccuracy` map field. The central total time SHALL be maintained as an exact integer throughout Phase 1 and Phase 2. It SHALL NOT be saturated, truncated, or clamped before central‑direction assignment and Phase 2 plateau computation are complete.
+
+
 **Algorithm:**
 
 The evaluator proceeds in two phases:
@@ -1554,26 +1571,65 @@ The per‑point values remain full‑precision throughout the aggregation; only 
    - **`total_time` computation:**  
      `total_time = block_time + (hold_cycles + sep_cycles) * T`. **The multiplication `(hold_cycles + sep_cycles) × T` and the subsequent addition shall be performed using 128‑bit unsigned arithmetic.** The absolute difference `|total_time − reference_block_time|` is then computed in 128‑bit arithmetic before being saturated to `UINT32_MAX` and stored in `block_time_inaccuracy`.
    
-   - In **long‑term mode**, the evaluator repeats the block simulation until the cumulative block time (excluding hold/sep) reaches or exceeds `window_duration`.  For each block `i`, the per‑block total time is computed as  
-     ```
-     total_time_i = block_time_i + (hold_cycles + sep_cycles) * T_i
-     ```  
-     where `T_i` is the cycle time for that block.  The long‑term total time `total_time_lt` is the arithmetic mean of these per‑block total times, computed with half‑to‑even division:  
-     ```
-     total_time_lt = round_half_even( sum(total_time_i) / block_count )
-     ```  
-     The `block_time_inaccuracy` field is then `|total_time_lt − reference_block_time|`, saturated to `UINT32_MAX`.  
+ - In **long‑term mode**, the evaluator repeats the block simulation until the cumulative block time (excluding hold/sep) reaches or exceeds
+  `window_duration`. For each block `i`, the per‑block total time is computed as total_time_i = block_time_i + (hold_cycles + sep_cycles) * T_i
 
-The division `round_half_even( sum(total_time_i) / block_count )` SHALL be performed in **256‑bit unsigned integer arithmetic**, preserving the full precision of the 256‑bit numerator. The rounding rule of §4.5.1 applies.
+  where `T_i` is the cycle time for that block.
 
-The sum `sum(total_time_i)` used in the long-term mean SHALL be accumulated in a 256-bit unsigned integer.
+  The long‑term total time `total_time_lt` is the arithmetic mean of these per‑block total times at jitter offset Δ = 0, computed with half‑to‑even
+  division:
 
+      total_time_lt = round_half_even( sum(total_time_i) / block_count )
 
-     If `max_eval_iterations` is exhausted before `window_duration` is reached, the candidate shall be marked with saturated sentinels, set `FLAG_AVOID`, set `FLAG_INVALID`; no partial average is emitted. The same `max_eval_iterations` (derived from `quantum` as specified in §3.4.1) applies to all candidates in the zone.
+  `total_time_lt` remains the central total time used for central‑direction flags, Phase 2 stability plateaus, and any metadata that reports the
+  long‑term central time.
 
-     Consequently, the long‑term aggregated metrics will be identical to those of a single‑block scan.  Long‑term mode is designed to be combined with a drift model to reveal temporal instability; used alone, it provides no additional information beyond a standard scan.
+  The `block_time_inaccuracy` field SHALL NOT be derived from the rounded `total_time_lt`.
 
-     **The cumulative block time used to compare against `window_duration` shall be accumulated in a 128‑bit unsigned integer to ensure determinism across the full normative window range.**
+  Instead, `block_time_inaccuracy` SHALL be computed from the exact rational deviation before final rounding:
+
+      sum_total   = Σ total_time_i        // Δ = 0 blocks only
+
+      ref_scaled  = (u256)reference_block_time * (u256)block_count
+                                           // Δ = 0 block count
+
+      if sum_total >= ref_scaled:
+          num = sum_total - ref_scaled
+      else:
+          num = ref_scaled - sum_total
+
+      block_time_inaccuracy =
+          min(
+              UINT32_MAX,
+              round_half_even( num / block_count )
+          )
+
+  All of `sum_total`, `ref_scaled`, and `num` are 256‑bit unsigned integers. `reference_block_time` is widened from `u32` to `u256`. `block_count` is widened from `u64` to `u256`. `round_half_even` follows §4.5.1.
+
+  `block_count` and `sum_total` refer exclusively to the temporal blocks simulated at jitter offset Δ = 0. They do NOT include other jitter offsets.
+
+  `block_count` at Δ=0 SHALL be at most the long‑term `max_eval_iterations` derived by the plan constructor, and therefore SHALL fit in `u64`.
+
+  **Implementation note:** The 256‑bit division SHALL follow §4.5.1. Implementations without native 256‑bit division may emulate it with
+  128‑bit limbs, provided the result is bit‑identical.
+
+  **Downstream tooling note:** The `block_time_inaccuracy` field produced by this computation represents the true average of rational deviations at the central jitter point.
+
+  Tools reconstructing map values from `.gunzstats` SHALL NOT use the aggregate `sum_total_block_time` and `block_count` fields to compute
+  central `block_time_inaccuracy`. Those fields aggregate **all** valid jitter points, not just Δ = 0.
+
+  The current 96‑byte `.gunzstats` record does NOT provide central‑jitter aggregates. Full reconstruction of central `block_time_inaccuracy` from
+  `.gunzstats` alone is not supported. A future companion or `.gunzmeta` extension may add central‑jitter aggregate fields if exact external
+  reconstruction is required.
+
+  If `max_eval_iterations` is exhausted before `window_duration` is reached, the candidate shall be marked with saturated sentinels, set `FLAG_AVOID`, set `FLAG_INVALID`; no partial average is emitted. The same `max_eval_iterations` (derived from `quantum` as specified in §3.4.1)
+  applies to all candidates in the zone.
+
+  For `block_time_inaccuracy`, long‑term mode with no drift and a single‑block measurement window yields the same value as a non‑long‑term
+  scan. Jitter and advance regularity may still differ because they aggregate across the jitter window and temporal blocks.
+
+  **The cumulative block time used to compare against `window_duration` shall be accumulated in a 128‑bit unsigned integer to ensure determinism
+  across the full normative window range.**
 
    - **Memory efficiency (normative):** 
 All per‑candidate temporary data (block time accumulators, jitter accumulators, variance intermediates) **must** be stored in the `ScratchArena` and reused across blocks. Implementations shall **not** allocate separate per‑block buffers.
@@ -1778,7 +1834,8 @@ For each evaluated candidate c, its central total time T_c is:
 - non‑long‑term scan: single‑block total_time computed at jitter offset Δ = 0.
 - long‑term scan: total_time_lt computed at jitter offset Δ = 0.
 
-The plateau computation uses full‑precision central total times. It SHALL NOT use the saturated block_time_inaccuracy field.
+The plateau computation uses the central total time `total_time_lt` as defined in long‑term mode, or the exact computed integer single‑block `total_time` for non‑long‑term scans. It SHALL NOT use the saturated `block_time_inaccuracy` field.
+
 
 The evaluated‑candidate array is the list of candidates in ascending frequency order, excluding:
 
@@ -3304,6 +3361,7 @@ A compliant implementation **SHALL**:
 - Decoders SHALL reject `FLAG_SKIPPED` placeholders with any central‑direction flag set.
 - Decoders SHALL reject `FLAG_INVALID` entries with any central‑direction flag set.
 - Library profiles SHALL NOT emit rounding metadata; decoders SHALL ignore rounding metadata if encountered.
+
 
 ---
 
