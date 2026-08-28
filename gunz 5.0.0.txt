@@ -15,7 +15,7 @@ Co-authored by DeepSeek and Corentin Amice.
 
 ---
 
-# GUNZ 5.0.0 — Graduated Underlying Navigation Zones -
+# GUNZ 5.0.0B — Graduated Underlying Navigation Zones -
 **ISA · Runtime · Library**
 
 ---
@@ -36,6 +36,223 @@ A normative **Conformance** chapter specifies test vectors that any compliant im
 
 ---
 
+## Index
+
+## Notation Box & Quick Reference
+
+The notation box is expanded with the following quick-reference tables:
+
+- Domains and Units table  
+- Dimensionless Quantities table  
+- Accumulator Widths table  
+- Rounding Rules Quick Table  
+- Map Entry Flag Legality table  
+- Long‑Jump Rules table  
+- Pipeline Order table  
+- Key Formulas table  
+- Common Reviewer Mistakes table  
+
+---
+
+## 1. Overview
+
+- 1.1 Architectural Intent and Conformance Profiles  
+  - Systems Integrator / Minimal Profile  
+  - AI Orchestrator / Full Profile  
+  - Trust boundaries (informative)  
+- 1.2 Minimal Conformance Profile  
+- 1.3 Conformance Profile Summary  
+
+---
+
+## 2. GUNZ‑ISA (Bytecode)
+
+- 2.1 Binary Encoding  
+- 2.2 Header (32 bytes) with flags  
+- 2.3 Opcodes  
+  - 2.3.1 Static Lane Opcodes (0x00‑0x0E)  
+    - HALT, LOOP, ZONE, SKIP_ZONE, EXPORT, IMPORT, STREAM, PURE_CALL, SCAN_RES, ORACLE, EXPORT_ORACLE  
+  - 2.3.2 Dynamic Lane Opcodes  
+    - ADVANCE, ROUND, DELTA, LIBREF  
+  - 2.3.3 Opcode Semantics (full normative descriptions)  
+- 2.4 Lane Selection  
+
+---
+
+## 3. GUNZ‑RT (Runtime)
+
+- 3.1 Memory Model  
+- 3.2 ExecutionPlan Lifecycle  
+- 3.3 ExecutionPlan Interface  
+  - Absolute‑frequency normalisation  
+  - Map assembly pipeline  
+  - Sparse‑omission ordering  
+- 3.4 Static Lane Execution  
+  - 3.4.1 Plan Construction  
+    - Iteration bounds  
+    - Fixed Safe Profile caps  
+    - LOOP/PURE_CALL parsing  
+  - 3.4.2 Arithmetic & Numerics  
+  - 3.4.3 Adaptive Multi‑Resolution Scanning (informative)  
+  - 3.4.4 Negative Cache & Plan Rejection  
+  - 3.4.5 Deferred Operations in Static Lane  
+- 3.5 Dynamic Lane Execution  
+  - 3.5.1 Dynamic‑Lane Loop Execution  
+    - Nested loop rules  
+    - Pending PURE_CALL consumption  
+    - State‑changing opcodes  
+- 3.6 Callback ABI  
+  - 3.6.1 Streaming Callback Contract  
+- 3.7 PURE_CALL Definition  
+  - Purity requirements  
+  - Sandboxing  
+  - Environment Snapshot binding  
+- 3.8 Recovery  
+- 3.9 Runtime Object Table  
+- 3.10 Library Table  
+  - Parameter merging  
+  - LIBREF consistency  
+- 3.11 Resonance Evaluator  
+  - Inputs and reference_block_time rules  
+  - Guessing rule  
+  - Phase 1: dense scan  
+  - Jitter window evaluation  
+  - Block simulation  
+  - Long‑term mode  
+  - Central‑direction assignment  
+  - Three‑Way Metric Model  
+  - PURE_CALL candidate context (16‑byte)  
+  - Callback write policy  
+  - Explicit delta override semantics  
+  - Phase 2: physical stability width  
+  - Derived advance‑regularity threshold  
+  - Detrimental mode marking  
+  - Final map entry consolidation  
+  - Skipped zones  
+  - Large zone clamping  
+  - Global iteration limit enforcement  
+  - Long‑term header/entry consistency  
+
+---
+
+## 4. GUNZ‑LIB (Libraries & Maps)
+
+- 4.1 Library Profiles  
+  - callback_output_size rules  
+  - jitter_window_radius  
+  - library profile validity  
+- 4.2 Map Encoding  
+  - 16‑byte entry layout  
+  - Interval flags  
+    - STAB_SATURATED, FLAG_AVOID, FLAG_SKIPPED, FLAG_INVALID, FLAG_CENTRAL_ABOVE, FLAG_CENTRAL_BELOW  
+  - Long‑jump sentinel and type tags  
+  - Sparse map emission algorithm  
+  - Canonical generation rule  
+- 4.2.1 Map Header (64‑byte)  
+  - All fields and consistency rules  
+- 4.3 Integrity & Fingerprint  
+  - Canonical map data checksum (xxh3_64)  
+  - Accidental Corruption vs. Tamper Evidence statement  
+  - XXH3‑128 map fingerprint  
+  - Dynamic‑lane fingerprint salting  
+- 4.4 Dense‑Scan Semantics  
+- 4.5 Normative Integer Arithmetic  
+  - 4.5.1 Half‑to‑Even Integer Division  
+  - 4.5.2 Integer Floor Square Root (isqrt_floor)  
+  - 4.5.3 Integer Standard Deviation  
+    - Exact rational algorithm  
+    - Two‑value closed form  
+- 4.6 Map Companion Metadata File (`.gunzmeta`)  
+  - Full scan maps vs derived maps  
+  - Plan parameters object  
+  - Metric extremes object  
+  - `degenerate_scan` field  
+- 4.7 Environment Snapshot Format  
+  - CBOR canonical order  
+  - Signature verification  
+  - Key management  
+- 4.8 Raw Statistics Companion File (`.gunzstats`)  
+  - 96‑byte record format  
+  - Candidate scope and alignment pass  
+- 4.9 Compressed Statistics File (`.gunzstatz`)  
+  - LEB128 encoding  
+  - Delta compression  
+- 4.10 Attestation Procedure  
+  - Full‑profile only  
+  - Ed25519 signature  
+  - RFC 8785 JSON canonicalisation  
+
+---
+
+## 5. GUNZ‑NET (Future)
+
+- Placeholder only. Not part of core 5.0.0A.
+
+---
+
+## 6. Conformance (Normative)
+
+- Evaluator arithmetic and metrics  
+- Map generation  
+- Detrimental mode  
+- Import and export  
+- Bytecode safety  
+- Runtime requirements  
+- Decoder validation  
+
+---
+
+## 7. Implementation Guidance (Informative)
+
+- Golden vectors  
+- SIMD and vectorisation  
+- Plateau‑jump optimisation  
+- Low‑frequency zone handling  
+- Memory efficiency  
+- Phoenix mechanism  
+- Hibernation  
+- Fuel budget and orchestration  
+- Jitter window radius guidance  
+- Global iteration limit enforcement  
+- Stability‑width algorithm notes  
+- Degenerate window_duration = 0  
+- Resource limits for untrusted programs  
+- Sparse‑map accumulator overflow example  
+- Typical worst‑case values  
+- Seed reference, calibrated reference, and guessing rule summary  
+
+---
+
+## 8. Long‑Running Guarantees
+
+- Monotonic generation counter  
+- Arena reset per scan epoch  
+- Bounded plan cache with eviction  
+- Recovery memory stability  
+
+---
+
+## 9. Architectural Stability
+
+- Backward compatibility intent  
+- Conformance suite enforcement  
+
+---
+
+## Appendix A — Implementation‑Defined Parameters
+
+## Appendix B — Example: Decoding a GUNZ 5.0.0A Resonance Map
+
+## Appendix C — Rationale for Constants
+
+## Appendix D — Error Codes Summary
+
+## Appendix E — Minimal Conformance Vectors (Normative)
+
+## Appendix F — Reference Sandbox and Environment Snapshot Example
+
+---
+
 # Notation Box
 
 | Symbol | Meaning |
@@ -50,6 +267,224 @@ A normative **Conformance** chapter specifies test vectors that any compliant im
 | `MUST` | Normative requirement |
 | `MAY` | Optional behaviour |
 | `SHOULD` | Recommended behaviour |
+
+
+## Domains and Units
+
+| Quantity | Domain | Unit / Representation | Notes |
+|----------|--------|----------------------|-------|
+| `time_unit` | time scale | exponent | Base time unit = `10^(−time_unit)` seconds |
+| `quantum` | time | base time units | Smallest timing step |
+| `cycle time T` | time | base time units | `T = floor(10^(time_unit+5) / freq)` |
+| `block_time` / `total_time` | time | base time units | Includes hold/sep where applicable |
+| `reference_block_time` | time | base time units | Stored as `u32` |
+| `block_time_inaccuracy` | time | base time units | Absolute deviation, saturated `u32` |
+| `jitter` | time | base time units | Population stddev of total block times, saturated `u8` |
+| `advance_regularity` | ticks | ticks × 100 | Average per‑cycle advance consistency, saturated `u16` |
+| `peak_advance_regularity` | ticks | ticks × 100 | Max per‑jitter‑point advance regularity, saturated `u16` |
+| `advance_regularity_full` | ticks | ticks × 100 | Full‑precision `.gunzstats` diagnostic, `u64` |
+| `drift` | ticks | ticks × 100 per cycle | GUNZ‑DRIFT companion, signed `s16` |
+| `drift_max` / `drift_min` | ticks | ticks × 100 per cycle | GUNZ‑DRIFT companion, signed `s16` |
+| `stability_width_internal` | frequency | 0.0001 Hz | Exact Phase 2 plateau width before saturation |
+| `stability_width` | frequency | 0.0001 Hz | Stored map field, saturated `u16` |
+| `stability_tolerance_time` | time | base time units | Derived from `quantum` and `reference_block_time` |
+| `base_freq` | frequency | 10⁻⁵ Hz | Map header base frequency |
+| `freq_candidate` | frequency | 10⁻⁵ Hz | Evaluator candidate frequency |
+| `freq_low` / `freq_high` | frequency | 10⁻⁵ Hz | Zone boundaries |
+| `effective_step` | frequency | 10⁻⁵ Hz | Dense‑scan step size |
+| `freq_delta_start` | frequency | 10⁻⁵ Hz | Entry offset relative to decoder current |
+| `window_duration` | time | base time units | Long‑term measurement window |
+| `max_lj_gap` | frequency | 10⁻⁵ Hz | Long‑jump gap size |
+
+
+## Dimensionless Quantities
+
+| Quantity | Type | Meaning |
+|----------|------|---------|
+| `mult_num` / `mult_den` | rational ratio | Advance multiplier, no physical unit |
+| `target_ticks` | count | Number of ticks required per block |
+| `hold_cycles` / `sep_cycles` | count | Extra cycles per block |
+| `N`, `N_hi`, `N_lo` | count | Block cycle counts |
+| `block_count` | count | Number of temporal blocks evaluated |
+| `run_length` | count | Consecutive candidates in a map entry |
+| `valid_jitter_points` | count | Number of valid jitter offsets |
+| `count_adv_lo` / `count_adv_hi` | count | Frequency counts of short/long advances |
+| `evaluated_candidate_count` | count | Number of successfully evaluated candidates |
+
+
+### Accumulator widths
+
+| Accumulator | Width | Notes |
+|-------------|-------|-------|
+| `S` | 128‑bit unsigned | Standard deviation sum |
+| `S2` | 256‑bit unsigned | Sum of squares |
+| `V` | 256‑bit unsigned | Variance numerator |
+| `D` | 256‑bit unsigned | `n²` |
+| `var_floor` | 256‑bit unsigned | `V // D` |
+| `q` | 256‑bit unsigned | `isqrt_floor(var_floor)` |
+| `midpoint_x4` | 256‑bit unsigned | `D(4q²+4q+1)` |
+| `V_x4` | 256‑bit unsigned | `4V` |
+
+
+`S` is the only one that may be 128 bits. Everything else must be at least 256 bits.
+
+
+### Rounding rules quick table
+
+| Computation | Rounding |
+|-------------|----------|
+| `T = C / f` | floor |
+| `d_lo_cont = T / quantum` | floor |
+| `adv_*_cont = d_*_cont * mult_num / mult_den` | floor |
+| `N₀ = ceil(target_ticks / max_advance)` | ceil |
+| long_term_max_eval = ceil(window_duration / quantum) | ceil |
+| `R = round(N*T / quantum) * quantum` | header `round_mode` |
+| `Q = R / quantum` | exact integer |
+| `max_lj_gap` | floor |
+| `advance_regularity_btu` | half‑to‑even |
+| `total_time_lt` mean | half‑to‑even |
+| `block_time_inaccuracy` long‑term | half‑to‑even after absolute difference |
+| `stability_width` | floor division by 10 |
+
+
+### Map entry flag legality
+
+| Situation | Legal flags |
+|-----------|-------------|
+| Evaluated normal | 0, `STAB_SATURATED`, `FLAG_AVOID`, `CENTRAL_ABOVE`, `CENTRAL_BELOW` |
+| `FLAG_SKIPPED` placeholder | only `FLAG_SKIPPED`, central flags clear, all metrics zero |
+| `FLAG_INVALID` | `FLAG_AVOID` + `FLAG_INVALID`, `stability_width=0`, `STAB_SATURATED=0`, central flags clear |
+| Both `FLAG_AVOID` and `FLAG_SKIPPED` | illegal |
+| Both central flags together | illegal |
+| `FLAG_INVALID` without `FLAG_AVOID` | illegal |
+
+
+### Long‑jump rules
+
+| Field | Meaning |
+|-------|---------|
+| `freq_delta_start` = 0 | Type 0 — unevaluated gap |
+| `freq_delta_start` = 1 | Type 1 — sparse‑omitted perfect interval |
+| `freq_delta_start` other | malformed |
+| Gap | strictly positive, exact multiple of `effective_step`, ≤ `max_lj_gap` |
+| Sentinel | `run_length == 0 && block_time_inaccuracy == 0` |
+
+
+### Pipeline order
+
+1. Phase 1 per candidate
+2. Central direction flags assigned
+3. `PURE_CALL`, if attached, sees only central flags
+4. Phase 2 stability plateau
+5. Detrimental `FLAG_AVOID` marking
+6. Per‑thread `SparseMapBuilder` streams
+7. Global merge + gap insertion
+8. Sparse emission, if enabled
+9. Final consolidation
+10. Serialization
+
+
+### Key formulas
+
+```text
+T              = floor(10^(time_unit + 5) / freq)
+d_lo_cont      = floor(T / quantum)
+d_hi_cont      = d_lo_cont + 1
+adv_lo_cont    = floor((d_lo_cont * mult_num) / mult_den)
+adv_hi_cont    = floor((d_hi_cont * mult_num) / mult_den)
+N₀             = ceil(target_ticks / max(adv_lo_cont, adv_hi_cont, 1))
+R              = round(N * T / quantum) * quantum
+Q              = R / quantum
+N_hi           = Q − N * d_lo_cont
+N_lo           = N − N_hi
+block_time     = R                          // no DELTA
+block_time     = ((N_lo*d_lo_ov + N_hi*d_hi_ov) * quantum)  // DELTA
+total_time     = block_time + (hold_cycles+sep_cycles)*T
+stability_tolerance_time = max(quantum, round_half_even(reference_block_time / 1_000_000))
+stability_width_internal = (freq[right] − freq[left]) // 10
+```
+
+
+### Common reviewer mistakes to avoid
+
+- **Independent maxima**: never multiply maximum sample count by maximum sample value. They are coupled through `T`, `N`, and `block_time`.
+- **`isqrt_rounded` is gone**: only `isqrt_floor` exists.
+- **Scalar score is gone**: core has three lower‑is‑better metrics; no scalar score.
+- **`FLAG_AVOID` not visible to `PURE_CALL`**: detrimental marking happens after Phase 2.
+- **`block_time_inaccuracy` vs `total_time_lt`**: different objects; do not derive one from the other.
+- **`effective_step` vs `step_freq`**: `effective_step` is stored in the map header; `step_freq` is only the bytecode operand.
+- **Central total time**: keep exact internally; saturate only map fields.
+
+### Map Entry Fields — 16‑byte Record
+
+| Field | Stored type | Stored saturation | Internal full precision before storage | Unit / Notes |
+|-------|-------------|-------------------|----------------------------------------|--------------|
+| `freq_delta_start` | `s16` | Hard range `[−32768, 32767]` | Internal absolute frequency difference in `u64`/`u128`; not saturation but overflow prevention via long‑jump | 10⁻⁵ Hz |
+| `run_length` | `u16` | 1–65535, split at overflow | Internal candidate count as `u64` | count |
+| `block_time_inaccuracy` | `u32` | Saturated to `UINT32_MAX` | Exact rational deviation computed in 256‑bit before saturation | base time units |
+| `jitter` | `u8` | Saturated to 255 | `jitter_internal`, exact standard deviation from §4.5.3 | base time units |
+| `flags` | `u8` | Reserved bits must be 0; legal combinations only | Same flags value, no separate internal width | bit field |
+| `advance_regularity` | `u16` | Saturated to 65535 | `avg_advance_regularity_internal`, full precision | ticks × 100 |
+| `peak_advance_regularity` | `u16` | Saturated to 65535 | Full‑precision per‑jitter‑point maximum before averaging | ticks × 100 |
+| `stability_width` | `u16` | Saturated to 65535 | `stability_width_internal`, exact Phase 2 plateau width | 0.0001 Hz |
+
+
+### Map Header Fields — 64‑byte Header
+
+| Offset | Field | Stored type | Range / Validation | Internal source / Notes |
+|--------|-------|-------------|--------------------|--------------------------|
+| 0–3 | `base_freq` | `u32` | 0 or valid zone minimum | 10⁻⁵ Hz |
+| 4–7 | `reference_block_time` | `u32` | ≤ `UINT32_MAX`; consistency with `reference_source` | base time units |
+| 8–11 | `quantum` | `u32` | ≥ 1 | base time units |
+| 12–15 | `target_ticks` | `u32` | ≥ 1 | count |
+| 16–19 | `mult_num` | `u32` | non‑zero | ratio numerator |
+| 20–23 | `mult_den` | `u32` | non‑zero | ratio denominator |
+| 24 | `round_mode` | `u8` | 0–3 | encoding |
+| 25 | `hold_cycles` | `u8` | 0–255 | count |
+| 26 | `sep_cycles` | `u8` | 0–255 | count |
+| 27 | `time_unit` | `u8` | ≤ 12 | exponent |
+| 28 | `reserved` | `u8` | must be 0 | first reserved byte |
+| 29 | `reserved` | `u8` | must be 0 | second reserved byte |
+| 30 | `jitter_window_radius` | `u8` | 0 or 1–255 | scale factor; 0 ⇒ 10000 |
+| 31 | `map_flags` | `u8` | reserved bits 0, 2–7 must be 0 | bit field |
+| 32 | `map_type` | `u8` | 0 or 1 | standard/detrimental |
+| 33 | `detrimental_jitter_threshold` | `u8` | stored non‑zero | resolved threshold |
+| 34–35 | `detrimental_advance_regularity_threshold` | `u16` | stored non‑zero | resolved threshold |
+| 36–37 | `map_version` | `u16` | exactly `0x0062` | format identity |
+| 38 | `reference_source` | `u8` | 0–3 | provenance |
+| 39 | `long_term_scan` | `u8` | 0 or 1 | mode |
+| 40–43 | `effective_step` | `u32` | ≥ 1 | 10⁻⁵ Hz |
+| 44–47 | `evaluated_candidate_count` | `u32` | derived from entry stream | count |
+| 48–55 | `xxh3_64` | `u64` | zeroed during computation | checksum |
+| 56–63 | `window_duration` | `u64` | 0 if non‑long‑term | base time units |
+
+
+### `.gunzstats` / `.gunzstatz` Record Fields — 96‑byte Record
+
+| Field | Stored type | Stored saturation | Internal full precision before storage | Unit / Notes |
+|-------|-------------|-------------------|----------------------------------------|--------------|
+| `block_count` | `u64` | none; full width | u64 exact | count |
+| `sum_block_time` | `u128` | saturated to `2¹²⁸−1` | u128 exact accumulator | base time units |
+| `sum_block_time_sq` | `u128` | saturated to `2¹²⁸−1` | u128 exact accumulator | base time units² |
+| `count_adv_lo` | `u16` | saturated to 65535 | u64 exact count | count |
+| `count_adv_hi` | `u16` | saturated to 65535 | u64 exact count | count |
+| `a` | `u16` | saturated to 65535 | internal full precision | ticks × 100 |
+| `b` | `u16` | saturated to 65535 | internal full precision | ticks × 100 |
+| `drift` | `s16` | saturated to `[−32768, 32767]` | signed full precision | GUNZ‑DRIFT |
+| `drift_max` | `s16` | saturated | signed full precision | GUNZ‑DRIFT |
+| `drift_min` | `s16` | saturated | signed full precision | GUNZ‑DRIFT |
+| `valid_jitter_points` | `u16` | none; ≥ 1 for evaluated | exact integer count from the jitter window evaluation | count |
+| `advance_regularity_full` | `u64` | `UINT64_MAX` sentinel if unavailable; otherwise saturate to `UINT64_MAX−1` | full precision | ticks × 100 |
+| `sum_total_block_time` | `u128` | saturated to `2¹²⁸−1` | u128 exact accumulator | base time units |
+| `sum_total_block_time_sq` | `u128` | saturated to `2¹²⁸−1` | u128 exact accumulator | base time units² |
+
+
+## Quick Saturation Rules
+- Time‑domain map metrics saturate to their stored integer type.
+- Frequency positions and gaps are exact in their internal widths; only the signed 16‑bit `freq_delta_start` field has range constraints, resolved via long‑jump emission.
+- `.gunzstats` cumulative sums saturate at `2¹²⁸−1`; no wrapping is permitted.
+- `advance_regularity_full` uses `UINT64_MAX` as a special “not recorded” sentinel; a true value equal to `UINT64_MAX−1` may represent either exact value or saturation, as noted in §4.8.
+- Internal full precision values should never be saturated before their final map or stats storage boundary.
 
 ---
 
@@ -235,7 +670,7 @@ These opcodes are deterministic and may only be used by programs that satisfy th
 | `0x09` | (reserved) | – | Reserved. | – |
 | `0x0A` | `PURE_CALL` | `u32 callback_id, u8 arg_count, u32 args[]` | Invoke a deterministic external function (§2.3.3.8). | No |
 | `0x0B` | `SCAN_RES` | `u32 step_freq, u8 flags` | Set dense‑scan step size (§2.3.3.9). | Yes |
-| `0x0D` | `ORACLE` | `u8 query_class, u32 max_block_time_inaccuracy, u8 max_jitter, u16 max_advance_regularity, u16 min_stability_width, u8 flags, u32 freq_low, u32 freq_high, u32 object_id` | Constraint‑query evaluation (see companion specification GUNZ‑ORACLE).  Result stored in object table at `object_id`. | No |
+| `0x0D` | `ORACLE` | `u8 query_class, u8 reserved, u8 reserved, u128 max_block_time_inaccuracy, u128 max_jitter, u128 max_advance_regularity, u128 max_peak_advance_regularity, u32 min_stability_width_internal, u32 freq_low, u32 freq_high, u32 object_id` | Constraint‑query evaluation (see companion GUNZ‑ORACLE). Result stored in object table at `object_id`. | No |
 | `0x0E` | `EXPORT_ORACLE` | `u32 object_id, u32 reserved` | Write CQR from object table to `.gunzoracle` file. Reserved operand must be `0`. | No |
 
 Full normative semantics for each opcode are given in §2.3.3.
@@ -369,14 +804,37 @@ A `SCAN_RES` with `step_freq = 0` is considered present for the purpose of the o
 The effective step size is recorded in the map header's `effective_step` field (see §4.2.1).
 
 **2.3.3.10 `ORACLE`**  
-The `ORACLE` opcode performs a constraint‑query evaluation according to the companion specification **GUNZ‑ORACLE**.  The instruction captures the current system state (multiplier, rounding mode, delta pair, `effective_step`, and any pending `PURE_CALL` specification) and the given parameters, including the `object_id`.  
 
-In both static‑lane and dynamic‑lane programs, `ORACLE` is **always deferred**: it is appended to a deferred‑operation queue and executed after the zone scan and before any map exports.  When executed, the oracle evaluates the query range and stores the resulting Constraint Query Result (CQR) in the runtime object table at the specified `object_id`.  If the object table entry already exists, it is overwritten.
+ The `ORACLE` opcode performs a constraint‑query evaluation according to the companion specification **GUNZ‑ORACLE**.
 
-The ORACLE instruction is exactly 24 bytes. Its packed little‑endian operand layout is defined in the companion GUNZ‑ORACLE specification.
+ The instruction is exactly **84 bytes**. Its packed little‑endian operand layout is:
 
-The effect of `ORACLE` on the live pending `PURE_CALL` specification — whether it is preserved, consumed, or otherwise modified — is defined by the GUNZ‑ORACLE
-companion specification. Core GUNZ specification SHALL NOT assign additional preserve/clear semantics to that interaction.
+ | Offset | Size | Field |
+ |--------|------|-------|
+ | 0  | u8  | opcode `0x0D` |
+ | 1  | u8  | `query_class` |
+ | 2  | u8  | reserved, must be `0x00` |
+ | 3  | u8  | reserved, must be `0x00` |
+ | 4  | u128 | `max_block_time_inaccuracy` |
+ | 20 | u128 | `max_jitter` |
+ | 36 | u128 | `max_advance_regularity` |
+ | 52 | u128 | `max_peak_advance_regularity` |
+ | 68 | u32 | `min_stability_width_internal` |
+ | 72 | u32 | `freq_low` |
+ | 76 | u32 | `freq_high` |
+ | 80 | u32 | `object_id` |
+
+ All integers are little‑endian and tightly packed. Decoders SHALL handle unaligned `u128` reads using the portable unaligned‑access rules required by §2.1.
+
+ The instruction captures the current system state (multiplier, rounding mode, delta pair, `effective_step`, and any pending `PURE_CALL` specification) and the given parameters, including the `object_id`.
+
+ In both static‑lane and dynamic‑lane programs, `ORACLE` is **always deferred**: it is appended to the deferred‑operation queue and executed after the zone scan and before any map exports. When executed, the oracle evaluates the query range and stores the resulting Constraint Query Result (CQR) in the runtime object table at the specified `object_id`. If an entry already exists, it is overwritten.
+
+ `ORACLE` SHALL NOT consume or clear a pending `PURE_CALL` specification. The pending `PURE_CALL` persists across `ORACLE` and is consumed only by the next `ZONE` or `SKIP_ZONE` in execution order.
+
+ Reserved bytes 2–3 must be zero. A non‑zero reserved byte causes the bytecode to be rejected with `GUNZ_MALFORMED_BYTECODE`.
+
+ Implementations that do not support the GUNZ‑ORACLE companion shall reject opcodes `0x0D` and `0x0E` with `GUNZ_MALFORMED_BYTECODE`.
 
 **2.3.3.11 `EXPORT_ORACLE`**  
 The `EXPORT_ORACLE` opcode writes the CQR data from the object table entry identified by `object_id` to a `.gunzoracle` file.  The second operand `reserved` must be `0x00000000`; a non‑zero value shall cause the bytecode to be rejected with `GUNZ_MALFORMED_BYTECODE`.  If the object does not contain a valid CQR, the operation fails with `GUNZ_INVALID_OBJECT`.
@@ -868,6 +1326,38 @@ For long‑term scans, the constructor‑derived `max_eval_iterations` takes pre
  
   If the total number of evaluator blocks exceeds an implementation‑defined threshold (at least 65,536), construction fails with `GUNZ_ARENA_EXHAUSTED`, as an implementation‑defined resource/complexity limit. These protections prevent denial‑of‑service via small bytecode programs that expand to enormous evaluator workloads.
 
+
+**Fixed Safe Profile caps (normative for 128/256‑bit exact runtimes).**
+For any conformant implementation that uses:
+
+- 128‑bit unsigned arithmetic for the sum accumulator `S`,- 256‑bit unsigned arithmetic for `S2`, `V`, `D`, `var_floor`,  `midpoint_x4`, and `V_x4`,
+
+plan construction SHALL enforce the following maximum parameter values unless the implementation provides a deterministic parameter‑interaction check that proves no accumulator overflow can occur for the actual supplied parameters
+
+| Parameter | Hard cap |
+|-----------|----------|
+| `target_ticks` | 2²⁵ |
+| `quantum` | 2³⁰ |
+| `mult_num` | 2²⁰ |
+| `mult_den` | 2²⁰ |
+| `window_duration` | 2⁴⁵ |
+| `time_unit` | ≤ 12 |
+| `reference_block_time` | already ≤ 2³²−1, no additional cap |
+
+
+Plan construction SHALL fail with `GUNZ_INVALID_LIBRARY` if any of these caps is exceeded.
+
+This profile applies to core GUNZ operation without optional companion extensions. If any companion extension is enabled — including, but not
+limited to, GUNZ‑DRIFT — the companion SHALL define and prove its own accumulator‑width guarantees, or the implementation SHALL provide a
+separate formal proof for the extended parameter space.
+
+**Alternative extended‑range compliance:**
+An implementation MAY accept parameter values above the Fixed Safe Profile caps only if it provides a formal proof that every intermediate value in the standard deviation computation of §4.5.3 — including `S`, `n`, `x_i²`, `S2`, `S²`, `V`, `D`, `var_floor`, `midpoint_x4`, and `V_x4` — remains within the chosen unsigned accumulator width under all input combinations reachable by the extended parameter set.
+
+Such an implementation SHALL still produce bit‑identical results to the Fixed Safe Profile for all parameter values that fall within the Fixed Safe Profile caps. Extended‑range implementations for which no formal overflow‑safety proof is provided SHALL NOT be considered conformant nor normative.
+
+
+
 For the three plan iteration limits, an explicitly supplied value of `0`, or an absent/uninitialised field treated as `0`, SHALL mean “use the default”:
 - `max_scan_iterations = 0` → `2²⁴`
 - `max_eval_iterations = 0` in a non‑long‑term scan → `65 536`
@@ -913,6 +1403,8 @@ This implementation‑defined evaluator‑block limit is denoted `MAX_STATIC_EVA
 
 - **Saturation:** Unless otherwise stated, saturation clamps a value to the nearest representable boundary of its destination type (e.g., `UINT32_MAX` for an unsigned 32‑bit field, 255 for a `u8`, 65535 for a `u16`, etc.). For signed integer fields, saturation clamps to the minimum or maximum representable value (e.g., `−32 768` to `32 767` for `s16`). Signed saturation is relevant only for fields that carry signed deltas (`freq_delta_start`) and for the long‑jump sentinel reinterpretation; all other paths use unsigned or exact arithmetic and do not produce signed overflow.
 
+*(Informative)* The only operand passed to the normative timing rounding function is `N × T / quantum`, where `N`, `T`, and `quantum` are all non‑negative integers. Therefore, for this timing computation, `round_mode = 3` (truncate) and `round_mode = 0` (floor) produce identical results.  The distinction only matters for signed inputs, which do not occur in the block‑time calculation. Both modes are retained for API compatibility and future extensions that may introduce signed timing quantities. 
+
 - Floating‑point arithmetic shall not influence observable outputs.
 
 - SIMD implementations must produce bit‑identical output to the scalar implementation.
@@ -948,7 +1440,7 @@ This iterative deepening is a core design pattern for GUNZ‑based tuning: the f
 
 In a static‑lane program, `ORACLE`, `EXPORT_ORACLE`, `EXPORT`, `IMPORT`, and `STREAM` are **not** executed during plan construction.  Instead, they are captured in the order they appear in the bytecode and appended to a deferred‑operation queue, together with the current `library_id`.
 
-- `ORACLE` captures the system state (multiplier, rounding mode, delta override, `effective_step`, and any pending `PURE_CALL` specification) and the instruction operands, including `object_id`.
+- `ORACLE` captures the system state (multiplier, rounding mode, delta override, `effective_step`, and any pending `PURE_CALL` specification) and the instruction operands, including `object_id`. The ORACLE instruction is exactly 84 bytes per §2.3.3.10. Its captured operand snapshot includes the four `u128` constraint fields, the `u32 min_stability_width_internal`, the `u32` frequency bounds, and the `u32 object_id`. ORACLE queries consume the remaining global scan budget as specified in §3.11 “Global iteration limit enforcement”.
 - `EXPORT_ORACLE` captures the `object_id` and the reserved operand (which must be zero).
 
 After the resonance map has been generated from all evaluated zones, the runtime executes the deferred queue in this deterministic order:
@@ -956,11 +1448,19 @@ After the resonance map has been generated from all evaluated zones, the runtime
 2. All captured `EXPORT_ORACLE` instructions are executed, writing the CQR data from the object table to a file.
 3. The remaining deferred operations (`EXPORT`, `IMPORT`, `STREAM`) are processed as originally specified.
 
-If any `ORACLE` query fails (e.g., due to invalid constraints or memory exhaustion), the runtime shall abort the deferred queue immediately, discard any remaining pending operations, and return the error code to the caller.  If an `EXPORT_ORACLE` references an `object_id` that has not been populated, the runtime fails with `GUNZ_INVALID_OBJECT`.
+If any `ORACLE` query fails (e.g., due to invalid constraints or memory exhaustion), the runtime shall abort the deferred queue immediately, discard any remaining pending operations, and return the error code to the caller.
 
-*(Informative)* The deferred queue is executed in three fixed phases: all `ORACLE` queries, then all `EXPORT_ORACLE` operations, then map‑manipulation operations (`EXPORT`, `IMPORT`, `STREAM`). This order is fixed regardless of the original bytecode program order. It guarantees that CQR data is available before any export that may consume it. Implementations SHALL NOT execute deferred operations in raw program order across phases. The three phases are fixed as described; within each phase, operations SHALL execute in capture order.
+If an `EXPORT_ORACLE` references an `object_id` that has not been populated, the runtime fails with `GUNZ_INVALID_OBJECT`.
 
-This deferred execution applies only to Full‑profile static‑lane programs; Minimal‑profile implementations reject `IMPORT`, `STREAM`, `ORACLE`, and `EXPORT_ORACLE` at load time per §1.2 and will never encounter these opcodes.  
+If a deferred operation fails, the runtime SHALL return the error to the caller and SHALL NOT execute any further operations in the deferred queue.
+
+The resonance map produced by zone evaluation before the failure SHALL remain available through the `SparseMapBuilder`.
+
+This version of the core does not define any automatic recovery or post‑failure export path. Companion specifications or external tools MAY define mechanisms to consume or persist that surviving map, provided they do so without altering the map’s canonical checksum or identity.
+
+*(Informative)* The deferred queue is executed in three fixed phases: all `ORACLE` queries, then all `EXPORT_ORACLE` operations, then map‑manipulation operations (`EXPORT`, `IMPORT`, `STREAM`). This order is fixed regardless of the original bytecode program order. It guarantees that CQR data is available before any export that may consume it. Implementations SHALL NOT execute deferred operations in raw program order across phases. The three phases are fixed as described; within each phase, operations SHALL execute in capture order. 
+
+This static‑lane deferred execution applies only to Full‑profile static‑lane programs; Dynamic‑lane deferred execution is defined in §3.5. Minimal‑profile implementations reject `IMPORT`, `STREAM`, `ORACLE`, and `EXPORT_ORACLE` at load time per §1.2 and will never encounter these opcodes.  
 
 If no zones were evaluated and the map is empty, a valid map consisting only of a header and the canonical map data checksum over the 64‑byte header is written by `EXPORT`.
 
@@ -1457,7 +1957,7 @@ Central total time SHALL be used for:
 - central‑direction flags,
 - Phase 2 stability plateaus.
 
-It SHALL NOT be derived from, or replaced by, the saturated `block_time_inaccuracy` map field. The central total time SHALL be maintained as an exact integer throughout Phase 1 and Phase 2. It SHALL NOT be saturated, truncated, or clamped before central‑direction assignment and Phase 2 plateau computation are complete.
+The central total time SHALL be maintained as a sufficiently wide integer throughout Phase 1 and Phase 2. It SHALL NOT be saturated, truncated, or clamped before central‑direction assignment and Phase 2 plateau computation are complete. In long‑term mode, this integer is the rounded mean `total_time_lt`; the exact rational mean is not used for plateau geometry. For a typical conformant implementation, at least `u128` in  non‑long‑term scans is required; in long-term, the rounded central total time `total_time_lt` itself only needs `u128`, but the accumulator `sum_total` used for `block_time_inaccuracy` needs u256. 
 
 
 **Algorithm:**
@@ -1571,18 +2071,17 @@ The per‑point values remain full‑precision throughout the aggregation; only 
    - **`total_time` computation:**  
      `total_time = block_time + (hold_cycles + sep_cycles) * T`. **The multiplication `(hold_cycles + sep_cycles) × T` and the subsequent addition shall be performed using 128‑bit unsigned arithmetic.** The absolute difference `|total_time − reference_block_time|` is then computed in 128‑bit arithmetic before being saturated to `UINT32_MAX` and stored in `block_time_inaccuracy`.
    
- - In **long‑term mode**, the evaluator repeats the block simulation until the cumulative block time (excluding hold/sep) reaches or exceeds
-  `window_duration`. For each block `i`, the per‑block total time is computed as total_time_i = block_time_i + (hold_cycles + sep_cycles) * T_i
+- In **long‑term mode**, the evaluator repeats the block simulation until the cumulative block time (excluding hold/sep) reaches or exceeds `window_duration`. For each block `i`, the per‑block total time is computed as
+
+      total_time_i = block_time_i + (hold_cycles + sep_cycles) * T_i
 
   where `T_i` is the cycle time for that block.
 
-  The long‑term total time `total_time_lt` is the arithmetic mean of these per‑block total times at jitter offset Δ = 0, computed with half‑to‑even
-  division:
+  The long‑term total time `total_time_lt` is the arithmetic mean of these per‑block total times at jitter offset Δ = 0, computed with half‑to‑even division:
 
       total_time_lt = round_half_even( sum(total_time_i) / block_count )
 
-  `total_time_lt` remains the central total time used for central‑direction flags, Phase 2 stability plateaus, and any metadata that reports the
-  long‑term central time.
+  `total_time_lt` remains the central total time used for central‑direction flags, Phase 2 stability plateaus, and any metadata that reports the long‑term central time.
 
   The `block_time_inaccuracy` field SHALL NOT be derived from the rounded `total_time_lt`.
 
@@ -1604,32 +2103,26 @@ The per‑point values remain full‑precision throughout the aggregation; only 
               round_half_even( num / block_count )
           )
 
-  All of `sum_total`, `ref_scaled`, and `num` are 256‑bit unsigned integers. `reference_block_time` is widened from `u32` to `u256`. `block_count` is widened from `u64` to `u256`. `round_half_even` follows §4.5.1.
+  All of `sum_total`, `ref_scaled`, and `num` are 256‑bit unsigned integers. `reference_block_time` is widened from `u32` to `u256`.
+  `block_count` is widened from `u64` to `u256`. `round_half_even` follows §4.5.1.
 
   `block_count` and `sum_total` refer exclusively to the temporal blocks simulated at jitter offset Δ = 0. They do NOT include other jitter offsets.
 
   `block_count` at Δ=0 SHALL be at most the long‑term `max_eval_iterations` derived by the plan constructor, and therefore SHALL fit in `u64`.
 
-  **Implementation note:** The 256‑bit division SHALL follow §4.5.1. Implementations without native 256‑bit division may emulate it with
-  128‑bit limbs, provided the result is bit‑identical.
+  **Implementation note:** The 256‑bit division SHALL follow §4.5.1.  Implementations without native 256‑bit division may emulate it with  128‑bit limbs, provided the result is bit‑identical.
 
-  **Downstream tooling note:** The `block_time_inaccuracy` field produced by this computation represents the true average of rational deviations at the central jitter point.
+  **Downstream tooling note:** The `block_time_inaccuracy` field produced  by this computation represents the true average of rational deviations at  the central jitter point.
 
-  Tools reconstructing map values from `.gunzstats` SHALL NOT use the aggregate `sum_total_block_time` and `block_count` fields to compute
-  central `block_time_inaccuracy`. Those fields aggregate **all** valid jitter points, not just Δ = 0.
+  Tools reconstructing map values from `.gunzstats` SHALL NOT use the  aggregate `sum_total_block_time` and `block_count` fields to compute  central `block_time_inaccuracy`. Those fields aggregate **all** valid  jitter points, not just Δ = 0.
 
-  The current 96‑byte `.gunzstats` record does NOT provide central‑jitter aggregates. Full reconstruction of central `block_time_inaccuracy` from
-  `.gunzstats` alone is not supported. A future companion or `.gunzmeta` extension may add central‑jitter aggregate fields if exact external
-  reconstruction is required.
+  The current 96‑byte `.gunzstats` record does NOT provide central‑jitter  aggregates. Full reconstruction of central `block_time_inaccuracy` from `.gunzstats` alone is not supported. A future companion or `.gunzmeta` extension may add central‑jitter aggregate fields if exact external reconstruction is required.
 
-  If `max_eval_iterations` is exhausted before `window_duration` is reached, the candidate shall be marked with saturated sentinels, set `FLAG_AVOID`, set `FLAG_INVALID`; no partial average is emitted. The same `max_eval_iterations` (derived from `quantum` as specified in §3.4.1)
-  applies to all candidates in the zone.
+  If `max_eval_iterations` is exhausted before `window_duration` is reached, the candidate shall be marked with saturated sentinels, set `FLAG_AVOID`, set `FLAG_INVALID`; no partial average is emitted. The same `max_eval_iterations` (derived from `quantum` as specified in  §3.4.1) applies to all candidates in the zone.
 
-  For `block_time_inaccuracy`, long‑term mode with no drift and a single‑block measurement window yields the same value as a non‑long‑term
-  scan. Jitter and advance regularity may still differ because they aggregate across the jitter window and temporal blocks.
+  For `block_time_inaccuracy`, long‑term mode with no drift and a single‑block measurement window yields the same value as a non‑long‑term scan. Jitter and advance regularity may still differ because they aggregate across the jitter window and temporal blocks.
 
-  **The cumulative block time used to compare against `window_duration` shall be accumulated in a 128‑bit unsigned integer to ensure determinism
-  across the full normative window range.**
+  **The cumulative block time used to compare against `window_duration` shall be accumulated in a 128‑bit unsigned integer to ensure  determinism across the full normative window range.**
 
    - **Memory efficiency (normative):** 
 All per‑candidate temporary data (block time accumulators, jitter accumulators, variance intermediates) **must** be stored in the `ScratchArena` and reused across blocks. Implementations shall **not** allocate separate per‑block buffers.
@@ -1683,11 +2176,23 @@ This is the same central total time used for `FLAG_CENTRAL_ABOVE` and `FLAG_CENT
 
 1. **`block_time_inaccuracy`**
 
-   The absolute deviation of the candidate’s central total time from `reference_block_time`, expressed in base time units.
+   For non‑long‑term scans, `block_time_inaccuracy` is the absolute   deviation of the single‑block `total_time` at jitter offset Δ = 0 from  `reference_block_time`, expressed in base time units:
 
-   *Usefulness:* This is the primary indicator of how closely the timing matches the desired target. It is directly comparable across scans with the same `time_unit`.
+       block_time_inaccuracy = |total_time − reference_block_time|
 
-   Because it is an absolute value, it loses the sign of the deviation. The central‑direction flags `FLAG_CENTRAL_ABOVE` and `FLAG_CENTRAL_BELOW` preserve whether the central total time was above or below `reference_block_time`.
+   For long‑term scans, `block_time_inaccuracy` is the correctly rounded  average of per‑block absolute deviations from `reference_block_time`, as  defined by the exact rational deviation formula in Step 3 long‑term mode:
+
+       block_time_inaccuracy =
+           round_half_even(
+               |sum(total_time_i) − reference_block_time × block_count|
+               / block_count
+           )
+
+   It SHALL NOT be derived from the rounded central total time  `total_time_lt`.
+
+   *Usefulness:* This is the primary indicator of how closely the timing  matches the desired target. It is directly comparable across scans with  the same `time_unit`.
+
+   Because it is an absolute value, it loses the sign of the deviation. The  central‑direction flags `FLAG_CENTRAL_ABOVE` and `FLAG_CENTRAL_BELOW`  preserve whether the central total time was above or below  `reference_block_time`.
 
 2. **`jitter`**
 
@@ -1722,14 +2227,23 @@ Because the metrics have different units and physical meanings, the core specifi
 
 **Candidate post‑processing (if a `PURE_CALL` is attached).**
 
-If the zone has an attached `PURE_CALL` (captured from the bytecode and resolved at plan‑construction time), the evaluator **SHALL** invoke the callback for each candidate immediately after the following values have been computed:
+The evaluator SHALL invoke the callback for each candidate immediately after
+the following values have been computed:
 
-- `block_time_inaccuracy`
-- `jitter`
-- `advance_regularity`
-- `peak_advance_regularity`
-- central‑direction flags
-- any detrimental flags
+- block_time_inaccuracy
+- jitter
+- advance_regularity
+- peak_advance_regularity
+- central-direction flags
+
+The callback‑visible `flags` byte SHALL contain only the two central‑direction
+bits, `FLAG_CENTRAL_ABOVE` and `FLAG_CENTRAL_BELOW`. All other bits, including
+`FLAG_AVOID`, `FLAG_INVALID`, `FLAG_SKIPPED`, `STAB_SATURATED`, and the reserved
+bits, SHALL be zero.
+
+Detrimental `FLAG_AVOID` marking is performed after Phase 2 and is therefore
+not visible to per‑candidate callbacks. The map entry may later receive
+`FLAG_AVOID`, but that occurs after all callbacks have returned.
 
 The callback **SHALL NOT** be invoked for candidates skipped because:
 
@@ -1751,7 +2265,7 @@ The runtime allocates a buffer of exactly `output_size` bytes, as declared in th
 | 0  | u32 | `freq_candidate` | Evaluator‑computed candidate frequency, in 10⁻⁵ Hz units. The evaluator always uses the original candidate frequency for the map entry, ignoring any value written by the callback. |
 | 4  | u32 | `block_time_inaccuracy` | Evaluator‑computed value, saturated to `UINT32_MAX`. Callback writes are ignored. |
 | 8  | u8  | `jitter` | Evaluator‑computed value, saturated to `255`. Callback writes are ignored. |
-| 9  | u8  | `flags` | Evaluator‑computed flags before the callback. Bits 0–3 may include `FLAG_AVOID`. Bits 4–5 contain the central‑direction flags assigned before the callback. Bits 6–7 are reserved and zero. Callback writes are ignored. |
+| 9  | u8  | `flags` | Evaluator‑computed flags before the callback. Bits 0–3 SHALL be zero. Bits 4–5 contain the central‑direction flags assigned before the callback. Bits 6–7 are reserved and zero. |
 | 10 | u16 | `advance_regularity` | Evaluator‑computed average advance regularity, saturated to `65535`. Callback writes are ignored. |
 | 12 | u16 | `peak_advance_regularity` | Evaluator‑computed peak advance regularity, saturated to `65535`. Diagnostic only. Callback writes are ignored. |
 | 14 | u16 | `stability_width` | Written as `0` by the evaluator. Final value assigned by Phase 2. Callback writes are ignored. |
@@ -1796,6 +2310,12 @@ Before the callback is invoked, the runtime SHALL zero‑fill all bytes of the `
 For core‑only operation, the applicable layout is the 16‑byte core candidate context. The zero‑fill region begins at offset 16 and continues through `output_size − 1`. The bytes in that region are available to the callback as scratch space, and any writes there SHALL also be ignored by the evaluator for map generation.
 
 When a companion extension is active, the applicable layout is defined by that companion. The zero‑fill region SHALL begin after the end of the extension‑defined candidate context layout and continue through `output_size − 1`.
+
+Companion extension activation SHALL be resolved during plan construction. The total candidate context layout for a plan is the **maximum** layout required by all active companion extensions and the core 16‑byte prefix.
+
+For a given plan and callback, the resolved total layout is fixed and cannot vary between invocations.
+
+If a callback’s declared `output_size` is smaller than the resolved total layout, plan construction SHALL fail with `GUNZ_INVALID_LIBRARY`.
 
 ---
 
@@ -1857,19 +2377,22 @@ Long‑jump entries are gaps, not candidates. They contain no evaluated candidat
 
 Sparse‑omitted perfect intervals are evaluated candidates and MAY be plateau members if their central total times satisfy the tolerance.
 
-The stability width is:
+TThe exact pre‑saturation plateau width is:
 
-    stability_width =
+    stability_width_internal =
         (freq_candidate[right] − freq_candidate[left]) // 10
 
-where // is floor division on non‑negative integers, as defined in the Notation Box. The result is expressed in 0.0001 Hz units and saturated to 65535.
+where // is floor division on non‑negative integers, as defined in the
+Notation Box. The result is expressed in 0.0001 Hz units.
 
-If right == left, stability_width = 0.
+If right == left, stability_width_internal = 0.
 
-Informative: This definition replaces the previous score‑based stability width and the time_unit < 9 zero‑width rule. Stability width is now derived from central total time alone and is meaningful at all time_unit values.
+The stored map field is:
+
+    stability_width = min(65535, stability_width_internal)
 
 **Saturation flag:** 
-If the pre‑saturation stability width exceeds 65535, the stored width is 65535 and `STAB_SATURATED` is set. If the pre‑saturation width equals 65535, the flag is cleared (the width is exactly representable). A cleared flag with a width of 65535 means "exactly 6.5535 Hz," not "unknown."
+If the pre‑saturation stability_width_internal exceeds 65535, the stored width is 65535 and `STAB_SATURATED` is set. If the pre‑saturation stability_width_internal equals 65535, the flag is cleared (the width is exactly representable). A cleared flag with a width of 65535 means "exactly 6.5535 Hz," not "unknown."
 
 **Derived advance‑regularity threshold value (normative).** 
 Before detrimental‑mode marking, the evaluator SHALL compute:
@@ -1877,11 +2400,26 @@ Before detrimental‑mode marking, the evaluator SHALL compute:
 ```text
 advance_regularity_btu =
     round_half_even(
-        (advance_regularity × mult_den × quantum)
+        (avg_advance_regularity_internal × mult_den × quantum)
         /
         (mult_num × 100)
     )
 ```
+
+where:
+
+- `avg_advance_regularity_internal` is the full‑precision per‑candidate
+  average advance regularity computed in Step 2, before saturation;
+
+- `advance_regularity` in the map entry remains the saturated u16 value;
+
+- `advance_regularity_full` in `.gunzstats` remains the stored u64
+  diagnostic value and is not used by this formula.
+
+*(Informative dimension analysis)*
+`avg_advance_regularity_internal` is expressed in ticks × 100. Multiplying by `quantum` converts ticks to base time units. The multiplier ratio `mult_num / mult_den` maps tick counts to actual advance units. Dividing by `100` removes the fixed‑point scaling.
+
+Therefore `advance_regularity_btu` is expressed in base time units, exactly matching the detrimental `detrimental_advance_regularity_threshold`.
 
 The division `/` denotes the exact rational quotient; `round_half_even` is the half‑to‑even integer division defined in §4.5.1, where `advance_regularity` is the full‑precision per‑candidate average computed in Step 2, not the saturated `u16` map‑entry field.  
 The result is expressed in base time units and SHALL be used only for the detrimental advance‑regularity threshold comparison.
@@ -1892,7 +2430,9 @@ When `map_type = 1`, an evaluated interval SHALL be marked `FLAG_AVOID` if:
 - its `jitter` ≥ `detrimental_jitter_threshold`, **or**
 - its `advance_regularity_btu` ≥ `detrimental_advance_regularity_threshold`.
 
-Detrimental `FLAG_AVOID` marking SHALL use the full‑precision `jitter` computed in Step 2 and the full‑precision converted `advance_regularity_btu` computed from the full‑precision average advance regularity. It SHALL NOT use the saturated `u8`/`u16` map‑entry fields.
+Detrimental `FLAG_AVOID` marking SHALL use `jitter_internal`, the full‑precision per‑candidate jitter computed in Step 2. It SHALL NOT use the saturated `u8`/`u16` map‑entry fields.
+
+The full‑precision converted `advance_regularity_btu` is computed from the full‑precision `avg_advance_regularity_internal`. It SHALL NOT use the saturated `u8`/`u16` map‑entry fields.
 
 For `map_type = 0`, detrimental marking is inactive.
 
@@ -1944,7 +2484,7 @@ gap = (freq_high − freq_low)
 
 These long‑jump entries SHALL carry type `0`. In the absolute-frequency merge phase, this advances `global_merge_current` to `freq_high + effective_step`, the first grid frequency after the zone. **If this gap exceeds `max_lj_gap`, the evaluator SHALL emit a sequence of long‑jump entries, each with a gap of at most `max_lj_gap`, until the total gap is covered.**
 
-Per‑zone truncation alone does not cause an error return. The evaluator continues with subsequent zones. If the global iteration pre‑pass has excluded any zone, the evaluator still returns `GUNZ_ITERATION_LIMIT_EXCEEDED` after all included zones finish.
+Per‑zone truncation alone does not cause an error return. The evaluator continues with subsequent zones. If the global iteration pre‑pass has excluded any zone, the evaluator still returns `GUNZ_ITERATION_LIMIT_EXCEEDED` after all included zones finish  evaluation and all deferred operations have completed.
 
  **Global iteration limit enforcement.**  
  Before parallel evaluation begins, the runtime shall perform a single‑threaded pre‑pass to determine which zones can be evaluated within the global iteration budget.  This pre‑pass guarantees that the set of evaluated and excluded zones is entirely deterministic and independent of thread scheduling.
@@ -1962,12 +2502,10 @@ Per‑zone truncation alone does not cause an error return. The evaluator contin
  After the pre‑pass completes, the runtime spawns worker threads only for the included zones.
  – Each included zone proceeds through its **normal evaluation**, including its own `max_scan_iterations` truncation if applicable.  No further global‑budget checks are required within the zone.
 
-Excluded zones SHALL be processed exclusively by the §3.3 Special-zone
-boundary insertion subsection. No separate excluded-zone emission rules apply
+Excluded zones SHALL be processed exclusively by the §3.3 Special-zone boundary insertion subsection. No separate excluded-zone emission rules apply
 in this section.
 
-*(Informative)* The resulting representation is one or more type-0 long-jump entries. When `global_merge_current < freq_low`, the emitted sequence covers
-both the inter-zone gap and the excluded zone as a single unevaluated interval. No separate `FLAG_SKIPPED` or alignment entry is emitted before that sequence.
+*(Informative)* The resulting representation is one or more type-0 long-jump entries. When `global_merge_current < freq_low`, the emitted sequence covers both the inter-zone gap and the excluded zone as a single unevaluated interval. No separate `FLAG_SKIPPED` or alignment entry is emitted before that sequence.
 
 Because an excluded-zone sequence starts at `global_merge_current` immediately before the excluded zone, the generic gap-detection phase treats the boundary
 as `Δ == effective_step`, and no separate inter-zone gap entry is inserted. For the exact ordering, splitting, and cursor rules, see §3.3.
@@ -1978,9 +2516,76 @@ as `Δ == effective_step`, and no separate inter-zone gap entry is inserted. For
   `gap_total = freq_high + effective_step − global_merge_current`
 ```
 
- When one or more zones are excluded, the evaluator shall return `GUNZ_ITERATION_LIMIT_EXCEEDED` after all included zones finish evaluation.
+ When one or more zones are excluded, the evaluator shall return `GUNZ_ITERATION_LIMIT_EXCEEDED` after all included zones finish evaluation and all deferred operations have completed.
 
  *(Informative)*  Stopping at the first zone that does not fit is a deliberate design choice; it makes the mechanism simple and predictable.  An alternative scheme that skips unfitting zones and continues checking later ones would be equally deterministic, but it is **not** conformant under this specification.  Because exclusion is determined by a sequential budget walk that stops at the first non‑fitting zone, a `SKIP_ZONE` that appears after an excluded `ZONE` will also be excluded, even though it costs zero iterations.  This is a consequence of the deterministic ordering rule and ensures that the map's spatial coverage is predictable.
+
+**Remaining budget definition:**
+After the zone pre‑pass completes, the runtime SHALL compute:
+
+```
+remaining_budget =
+    total_max_scan_iterations − sum_of_included_zone_candidate_counts
+```
+
+where:
+
+- `sum_of_included_zone_candidate_counts` is the sum of the candidate counts of all zones marked **included** by the pre‑pass.
+- `remaining_budget` is computed using unsigned 64‑bit arithmetic.
+
+If no zone is included, `remaining_budget = total_max_scan_iterations`.
+
+This value is fixed after the pre‑pass. It SHALL NOT be recomputed, increased, or reset during deferred operation processing.
+
+ **Deferred companion operations:**
+Any companion operation that performs candidate evaluation SHALL consume budget from `remaining_budget`.
+
+Companion operations SHALL execute in the same deterministic deferred order defined in §3.4.5 and §3.5:
+
+1. ORACLE queries, in capture order.
+2. EXPORT_ORACLE operations, in capture order.
+3. EXPORT, IMPORT, and STREAM operations, in capture order.
+
+Within each phase, operations consume budget in capture order.
+
+A companion operation SHALL declare an upper‑bound candidate count before execution. If:
+
+```
+upper_bound_candidates > remaining_budget
+```
+
+the operation SHALL fail with `GUNZ_ITERATION_LIMIT_EXCEEDED`, and the deferred queue SHALL abort according to the normal deferred‑operation error rules.
+
+Otherwise:
+
+- the operation executes,
+- `remaining_budget` is reduced by `upper_bound_candidates` immediately after execution,
+- processing continues with the next deferred operation.
+
+The reduction uses saturating unsigned subtraction; under the declared‑bound rule, saturation cannot occur.
+
+**Error precedence:**
+If the zone pre‑pass excluded at least one zone:
+
+- the run SHALL return `GUNZ_ITERATION_LIMIT_EXCEEDED` after all deferred operations complete,
+- regardless of whether companion budget accounting succeeded or failed.
+
+Zone exclusion is the primary budget signal. Companion success cannot override it.
+
+If no zone was excluded, but a companion operation exhausts the remaining budget and fails, the run SHALL return `GUNZ_ITERATION_LIMIT_EXCEEDED`.
+
+**Scope:**
+The general budget container applies to companion operations that perform candidate evaluation.
+
+Zone evaluation consumes budget only through the zone pre‑pass. No runtime atomic counter or dynamic reallocation is used.
+
+Companion specifications SHALL define their own candidate‑count accounting. The core provides only:
+
+- the fixed `remaining_budget` container,
+- the deterministic deferred ordering,
+- the failure semantics.
+
+*(Informative)* GUNZ‑ORACLE defines its candidate‑count rules in ORACLE §6.5. Other companions may use this same mechanism.
 
 **Long-term header/entry consistency:**
 The map header's `long_term_scan` field (offset 39) is the sole authoritative source for whether a map was produced in long‑term mode. There is no per‑entry flag for this information. A conformant decoder shall use the header field to determine the mode for all entries in the map.
@@ -2088,7 +2693,7 @@ The map header's `long_term_scan` field (offset 39) is the sole authoritative 
 
 | Bit | Name | Description |
 |-----|------|-------------|
-| 0   | `STAB_SATURATED`  | Set when pre‑saturation stability width > 6.5535 Hz; not set for exactly 6.5535 Hz. |
+| 0   | `STAB_SATURATED`  | Set when pre‑saturation `stability_width_internal` > 6.5535 Hz; not set for exactly 6.5535 Hz. |
 | 1   | `FLAG_AVOID`     | Detrimental resonance. |
 | 2 | `FLAG_SKIPPED` | Not evaluated because the zone was skipped. |
 | 3 | `FLAG_INVALID` | Saturated‑skipped candidate; no `.gunzstats` record exists. |
@@ -2156,6 +2761,8 @@ A long‑jump entry is identified by the sentinel:
 ```
 run_length == 0 && block_time_inaccuracy == 0
 ```
+
+Any entry with `run_length == 0` SHALL be interpreted as a long‑jump entry if `block_time_inaccuracy == 0`; otherwise the map is malformed and SHALL be rejected with `GUNZ_MALFORMED_BYTECODE`.
 
 Under this sentinel, the fields are reinterpreted as follows:
 
@@ -2349,7 +2956,7 @@ The map header is exactly **64 bytes**. All integers are little‑endian. Reserv
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0–3 | u32 | `base_freq` | Base frequency, in 10⁻⁵ Hz units. The `base_freq` field SHALL be set to the starting frequency of the first map entry after all per‑thread `SparseMapBuilder`s have been merged in ascending order. This equals the minimum `freq_low` among all zones, including those excluded by the iteration budget, which still produce a long‑jump entry at that frequency. If the program contains at least one `ZONE` or `SKIP_ZONE`, even if every such zone is excluded by the iteration pre‑pass, `base_freq` SHALL be the minimum `freq_low` among those zones. If the program contains no `ZONE` or `SKIP_ZONE` instructions at all, `base_freq` SHALL be `0`. An empty map is a map with no entries. Its `base_freq` SHALL be `0`. |
-| 4–7 | u32 | `reference_block_time` | Ideal block time, expressed in the base time unit. All time values in this header are expressed in the same base time unit as the rest of the map. Must satisfy the consistency rule with `reference_source` below. |
+| 4–7 | u32 | `reference_block_time` | Ideal block time, expressed in the base time unit. All time values in this header are expressed in the same base time unit as the rest of the map. Must satisfy the consistency rule with `reference_source` below. *(Informative)* A zero `reference_block_time` with `reference_source = 0` means no reference was applicable, not that the ideal block time is zero. It indicates that no evaluated candidate was present to define a reference. |
 | 8–11 | u32 | `quantum` | Clock granularity in base time units. The stored value is the merged effective `quantum`. SHALL be ≥ 1. Decoders SHALL reject a map where `quantum == 0`, returning `GUNZ_MALFORMED_BYTECODE`. |
 | 12–15 | u32 | `target_ticks` | Ticks to reach. SHALL be ≥ 1. Decoders SHALL reject a map where `target_ticks == 0`, returning `GUNZ_MALFORMED_BYTECODE`. |
 | 16–19 | u32 | `mult_num` | Advance multiplier numerator. SHALL be non‑zero. Decoders SHALL reject a map where `mult_num == 0`, returning `GUNZ_MALFORMED_BYTECODE`. |
@@ -2429,6 +3036,14 @@ Dynamic‑lane fingerprint salting does not alter these bytes and SHALL NOT be a
 For an empty map, the checksum is computed over the 64‑byte header only; no entry bytes are included.
 
 The fingerprint is computed after the map header has passed all reserved‑field checks.
+
+**Accidental Corruption vs. Tamper Evidence (Normative Statement)**
+
+The canonical map data checksum (`xxh3_64`) is designed to detect **accidental corruption** — bit flips, truncation, bad writes. It is **not** a cryptographic message authentication code, and it does **not** authenticate the producer or protect against deliberate forgery.
+
+Any system that accepts maps from untrusted sources SHALL apply an external signature or keyed MAC over the canonical map data before treating its contents as trusted.
+
+The core GUNZ format intentionally provides no such mechanism, in order to keep the Minimal Profile lightweight and dependency‑free.
 
   **Fingerprint (global identity):**
 
@@ -2544,20 +3159,34 @@ if (r > 50 || (r == 50 && (q & 1) != 0)) {
 | `adv_lo_cont = (d_lo_cont × mult_num) / mult_den` | Fixed floor |
 | `adv_hi_cont = (d_hi_cont × mult_num) / mult_den` | Fixed floor |
 | `N₀ = ceil(target_ticks / max(adv_lo_cont, adv_hi_cont, 1))` | Fixed ceil |
-| `long_term_max_eval = ceil(window_duration / T_min)` | Fixed ceil |
+| `long_term_max_eval = ceil(window_duration / quantum)` | Fixed ceil |
 | `R = round(N × T / quantum) × quantum` | Header `round_mode` |
 | `Q = R / quantum` | Exact; result integer by construction |
 | `max_lj_gap = ((2⁶³ − 1) // effective_step) × effective_step` | Fixed floor |
 | Candidate / gap divisions where both operands are exact multiples of `effective_step` | Exact integer division; no rounding |
 | `advance_regularity_btu` | Fixed half‑to‑even, independent of `round_mode` |
-| Variance numerator division `V / n²` | Fixed half‑to‑even |
 | `total_time_lt` mean division | Fixed half‑to‑even |
-| Standard deviation `isqrt_rounded(var)` | Canonical integer square root rounding |
 | Stability width `span / 10` | Fixed truncation toward zero |
 
-#### 4.5.2 Integer Square Root with Rounding
+#### 4.5.2 Integer Floor Square Root (Normative)
 
-**`isqrt_rounded(x)`** returns the integer `r` that minimises the distance `|r² − x|`.  For integer inputs, no ties can occur; the result is the unique integer closest to the true square root.  The half‑to‑even tie‑break rule is not applicable and may be omitted. This function is the canonical integer square root used in all normative computations.
+`isqrt_floor(x)` returns the largest non‑negative integer `r` such that `r² ≤ x`.
+
+- For `x = 0`, `isqrt_floor(0) = 0`.
+- For any positive integer `x`, the returned value is the exact floor of the mathematical square root: `⌊√x⌋`.
+
+This function is the canonical integer square root used in all normative computations requiring root extraction, including the exact rational
+standard deviation algorithm of §4.5.3.
+
+`isqrt_floor` is the **only** integer square root function used by normative core computations.
+
+The former `isqrt_rounded` function is removed from this specification. It SHALL NOT be referenced by conformant implementations, normative
+algorithms, or conformance test vectors.
+
+Any deterministic algorithm producing this exact floor value is conformant. Implementations are permitted to use bitwise digit-by-digit algorithms,
+restoring/non-restoring array steps, or optimized subtraction loops, provided the output matches the floor invariant for every input value
+required by any normative computation using `isqrt_floor`, including the 256‑bit values used by §4.5.3.
+
 
 #### 4.5.3 Integer Standard Deviation (Normative Algorithm)
 
@@ -2565,24 +3194,56 @@ All standard deviation values in the map are computed using the following determ
 
 Let the data values be `x₀, …, xₙ₋₁` (all non‑negative 128‑bit integers).
 
-1. Compute the sum using a **128‑bit unsigned** accumulator:
-   `S = Σ xᵢ` (exact).
+1. Compute the sum using a 128‑bit unsigned accumulator:
 
-2. Compute the sum of squares using a **256‑bit unsigned** accumulator:
-   `S2 = Σ (xᵢ)²` (exact, using 128‑bit multiplication for each term, then extended to 256‑bit).
+       S = Σ xᵢ
 
-3. Compute the variance numerator using a **256‑bit unsigned** accumulator:
-   `V = n · S2 − S²` (exact; both `S²` and `n·S2` are 256‑bit).
+2. Compute the sum of squares using a 256‑bit unsigned accumulator:
 
-4. Compute the integer variance using the half-to-even division defined in §4.5.1:
-   `var = round_half_even(V / n²)`
- 
-    This yields the population variance σ².
+       S2 = Σ (xᵢ)²
 
-5. Compute the integer standard deviation using the canonical integer square root, per §4.5.2:
-   `σ = isqrt_rounded(var)`
- 
-   The result `σ` is the standard deviation in the same unit as the input values.
+3. Compute the exact variance numerator:
+
+       V = n · S2 − S²
+
+   as a 256‑bit unsigned integer.
+
+4. Let D = n × n, computed as a 256‑bit unsigned integer.
+
+5. Let var_floor = V // D
+   using 256‑bit unsigned floor division.
+
+   Let q = isqrt_floor(var_floor).
+
+   Compute the exact integer midpoint scaled by 4 to eliminate fractions:
+
+       midpoint_x4 = D × (4 × q² + 4 × q + 1)
+
+   Let V_x4 = 4 × V
+
+   If V_x4 < midpoint_x4:
+
+       σ = q
+
+   Else if V_x4 > midpoint_x4:
+
+       σ = q + 1
+
+   Else:
+
+       // Exact rational tie: true standard deviation is exactly halfway
+       // between q and q+1. Apply half‑to‑even rounding.
+       //
+       // Note: This branch is reachable only when D is a multiple of 4,
+       // i.e. when n is even. For odd n, 4·V is even and
+       // D·(4q² + 4q + 1) is odd, so equality cannot occur.
+       σ = q if q is even, else q + 1
+
+All multiplications, divisions, and comparisons in Steps 1–5 SHALL use 128‑bit unsigned arithmetic for `S`, and 256‑bit unsigned arithmetic for
+`S2`, `V`, `D`, `var_floor`, `midpoint_x4`, and `V_x4`.
+
+The final `σ` is the correctly rounded integer standard deviation in the same unit as the input values.
+
 
 **Accumulator width relaxation (informative for implementers):**
 The algorithm as defined uses 128‑bit and 256‑bit intermediates to guarantee exactness for all possible inputs up to the normative maximums. An implementation **may** use narrower intermediates (e.g., 128‑bit for the variance numerator) **if and only if** it can mathematically prove that the resulting standard deviation is bit‑identical to the output of the algorithm above for all inputs within the normative bounds. The burden of proof rests with the implementer; a conformant test suite will expect bit‑identical results.
@@ -2595,13 +3256,25 @@ For detrimental threshold comparison, the evaluator SHALL convert the full‑pre
 This derived value is used only for the detrimental advance‑regularity threshold.
 
 **Permitted optimisation for two‑valued multisets (advance regularity):**
-For the special case where the multiset contains only two distinct values `a` and `b`, with multiplicities `n_a` and `n_b` (and `n = n_a + n_b`), implementations may compute the variance directly as `var = n_a·n_b·(a − b)² / n²` using 256‑bit integer arithmetic, since this formula is algebraically identical to the general sum‑of‑squares method and yields the same rounded result. No other alternative variance algorithm is permitted. **The division by n² in the closed‑form variance computation must use the half‑to‑even rounding defined in §4.5.1; truncating integer division will produce incorrect results.**
+For the special case where the multiset contains only two distinct values `a` and `b`, with multiplicities `n_a` and `n_b` (and `n = n_a + n_b`), implementations MAY compute the variance numerator directly as:
+
+    V = n_a · n_b · (a − b)²
+    D = n²
+
+and then apply Step 4 and Step 5 of this section exactly as in the general algorithm.
+
+No other shortcut is permitted.
+
 
 ---
 
 ### 4.6 Map Companion Metadata File (`.gunzmeta`)
 
 Every time a scan map is produced by Phase 1/Phase 2 of a plan, a Full-profile implementation SHALL also write a companion metadata file with the same base name and extension `.gunzmeta`.
+
+The `.gunzmeta` file is an advisory companion description. It is generated deterministically by the same scanner that produced the map, but its summary fields—including `metric_extremes`, `scan_zones` optional statistics, `scan_cost`, and `resonance_quality`— are not covered by the map’s canonical `xxh3_64` checksum or XXH3‑128 fingerprint.
+
+Therefore, these fields SHALL NOT be treated as tamper‑evident or as independent proof of map content. They are provided for convenience, archival context, and feedback. An auditor requiring exact verification SHALL either re‑execute the original bytecode or validate against the companion `.gunzstats` / `.gunzstatz` files, when present.
 
 For the purpose of this section, a map produced by a plan that contains no included `ZONE` instructions — for example a map consisting only of `FLAG_SKIPPED` placeholders, type‑0 long‑jump entries, or an empty map — is still considered a scan map, because it is produced by that plan's execution, not derived from existing maps.
 
@@ -2654,7 +3327,9 @@ Scan map metadata keys:
 | `plan_parameters` | object | Mandatory ; All evaluator and scan parameters used for this map.  See **Plan parameters object** below.  |
 | `drift_enabled` | boolean | Optional ; `true` if the drift metric was computed for this scan.  Absent or `false` otherwise. |
 | `map_flags` | integer | Optional ; The raw `map_flags` byte from the map header. |
-| `scan_zones` | array | Mandatory ; Evaluated and excluded zones.  Each element is an object containing: <br> – `freq_low` (integer) – zone start (10⁻⁵ Hz). <br> – `freq_high` (integer) – zone end. <br> – `excluded` (boolean, optional) – `true` if the zone was excluded by the global iteration pre‑pass; absent or `false` otherwise. <br><br> The following fields **MAY** also be present for fully evaluated zones; they are omitted for excluded zones and are entirely optional: <br> – `max_stability_width` (integer) – maximum stability width (0.0001 Hz units). <br> – `max_jitter` (integer) – maximum jitter observed in the zone (base time units), **before saturation** to the `u8` field. <br> – `max_advance_regularity` (integer, optional) – The maximum per‑jitter‑point advance regularity observed across all candidates in the zone, expressed in ticks × 100. The value is taken directly from the raw full‑precision integer computed at each jitter point before any averaging across points and before saturation to 65535. It represents the single most extreme instantaneous advance irregularity encountered anywhere in the zone. <br> – `candidates_avoided` (integer) – number of candidates marked `FLAG_AVOID`. <br> – `candidates_skipped` (integer) – (Optional) number of candidates marked `FLAG_SKIPPED`.  For any evaluated zone this count is always zero. <br> – `max_eval_iterations` (integer) – For long-term scans: the constructor-derived per-candidate limit for this zone. Omitted for non-long-term scans. <br> The optional per-zone metrics SHALL be computed over evaluated candidates only. Saturated‑skipped candidates marked `FLAG_INVALID` SHALL be excluded. |
+| `scan_zones` | array | Mandatory ; Evaluated and excluded zones.  Each element is an object containing: <br> – `freq_low` (integer) – zone start (10⁻⁵ Hz). <br> – `freq_high` (integer) – zone end. <br> – `excluded` (boolean, optional) – `true` if the zone was excluded by the global iteration pre‑pass; absent or `false` otherwise. <br><br> The following fields **MAY** also be present for fully evaluated zones; they are omitted for excluded zones and are entirely optional: <br> – `max_stability_width` (integer) –`max_stability_width` — the maximum pre‑saturation Phase 2 plateau width
+across evaluated candidates in this zone, expressed in 0.0001 Hz units. This is `stability_width_internal`, not the saturated `u16` map‑entry value. It SHALL be taken from the evaluator’s internal plateau width before
+saturation to 65535. <br> – `max_jitter` (integer) – maximum jitter observed in the zone (base time units), **before saturation** to the `u8` field. <br> – `max_advance_regularity` (integer, optional) – The maximum per‑jitter‑point advance regularity observed across all candidates in the zone, expressed in ticks × 100. The value is taken directly from the raw full‑precision integer computed at each jitter point before any averaging across points and before saturation to 65535. It represents the single most extreme instantaneous advance irregularity encountered anywhere in the zone. <br> – `candidates_avoided` (integer) – number of candidates marked `FLAG_AVOID`. <br> – `candidates_skipped` (integer) – (Optional) number of candidates marked `FLAG_SKIPPED`.  For any evaluated zone this count is always zero. <br> – `max_eval_iterations` (integer) – For long-term scans: the constructor-derived per-candidate limit for this zone. Omitted for non-long-term scans. <br> The optional per-zone metrics SHALL be computed over evaluated candidates only. Saturated‑skipped candidates marked `FLAG_INVALID` SHALL be excluded. |
 | `metric_extremes` | object | Optional ; Global summary of stored metric ranges and central‑direction counts across all evaluated candidates. See **Metric extremes object** below. |
 | `long_term_scan` | boolean | Conditional ; Retained for backward compatibility; must mirror `plan_parameters.long_term_scan`. |
 | `time_unit` | integer | Optional ; Decimal exponent (same as header) |
@@ -2668,6 +3343,7 @@ Scan map metadata keys:
 | `resonance_quality` | object | Optional ; deterministic summary of scan findings.  The following optional fields **MAY** be present: <br> – `max_per_block_advance_regularity` (integer) – The largest per‑block advance regularity observed across all blocks and candidates in the scan, expressed in ticks × 100.  Computed as described in §3.11.  Zero or absent if not computed.  Without drift, this value equals the per‑jitter‑point pooled advance regularity. |
 | `system_info` | object | Optional ; host machine details. Informational and non-deterministic. SHALL NOT be included in canonical attestation metadata. |
 | `stability_tolerance_time` | integer | Optional ; Derived plateau tolerance used for `stability_width`. Informational only. Must match `max(quantum, round_half_even(reference_block_time / 1_000_000))`. See Derived stability tolerance field. |
+| `degenerate_scan` | boolean | Optional ; `true` if `long_term_scan == 1`, `window_duration == 0`, and all successfully evaluated candidates were excluded because `max_eval_iterations` was zero. Absent or `false` otherwise. | 
 
 
 **Derived stability tolerance field**
@@ -3797,6 +4473,39 @@ The bullets are test requirements, not standalone normative requirements; normat
 - Guessing‑rule fallback: midpoint, then `freq_low`, then `freq_high`.
 - Low‑frequency zone handling, including skipped invalid jitter points.
 
+**Exact Rational Standard Deviation Vectors**
+Vector 1 — Full pipeline from raw samples:
+
+    x = [5, 6, 7, 8]
+
+    n = 4
+    S = 26
+    S2 = 174
+    V = 4 × 174 − 26² = 20
+    D = 16
+    var_floor = 20 // 16 = 1
+    q = isqrt_floor(1) = 1
+
+    midpoint_x4 = 16 × (4×1 + 4×1 + 1) = 144
+    V_x4 = 4 × 20 = 80
+
+    80 < 144 → σ = 1
+
+Vector 2 — Exact tie from variance numerator:
+
+    V = 104
+    n = 4
+
+    D = 16
+    var_floor = 104 // 16 = 6
+    q = isqrt_floor(6) = 2
+
+    midpoint_x4 = 16 × (4×4 + 4×2 + 1) = 400
+    V_x4 = 4 × 104 = 416
+
+    416 > 400 → σ = 3
+
+
 ### Physical stability width
 
 - Stability tolerance computed once per map:
@@ -4012,4 +4721,4 @@ A real snapshot must also include a `signature` key (byte string of 64 bytes) pl
 
 ---
 
-*GUNZ 5.0.0 — Graduated Underlying Navigation Zones — specification complete.*
+*GUNZ 5.0.0B — Graduated Underlying Navigation Zones — specification complete.*
