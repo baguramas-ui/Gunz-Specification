@@ -789,7 +789,7 @@ Set the dense‑scan step size in 10⁻⁵ Hz units.  A value of 0 means "use 
 
  If a program never emits a `SCAN_RES` instruction, the evaluator behaves as if `effective_step = 1` (10⁻⁵ Hz).  A `SCAN_RES` with `step_freq = 0` is equivalent to the absent case.  The `flags` operand is reserved and must be `0x00`; a non‑zero value shall cause the bytecode to be rejected with `GUNZ_MALFORMED_BYTECODE`.  
 
-The `effective_step` is a **program‑wide constant**.  The bytecode loader **SHALL** scan the entire bytecode (including any bytecode that may be expanded from `LOOP` instructions) and reject the program with `GUNZ_MALFORMED_BYTECODE` if any `SCAN_RES` opcode is found at a byte offset greater than the offset of the first `ZONE` or `SKIP_ZONE` instruction.  This check is performed statically before execution begins; it applies equally to static‑lane and dynamic‑lane programs.
+The `effective_step` is a **program‑wide constant**. The bytecode loader **SHALL** scan the entire effective instruction sequence (including any bytecode that may be expanded from `LOOP` instructions, as defined below) and reject the program with `GUNZ_MALFORMED_BYTECODE` if any `SCAN_RES` opcode appears after the first `ZONE` or `SKIP_ZONE` in that effective sequence. This check is performed statically before execution begins; it applies equally to static‑lane and dynamic‑lane programs.
 
 For programs containing `LOOP` instructions, the loader SHALL determine the effective inline instruction sequence by either:
 
@@ -939,10 +939,19 @@ An `ExecutionPlan` contains no runtime feature‑selection branches; all invaria
 This definition is authoritative for all normative uses of the dense‑scan step size. `step_freq` appears only as the bytecode `SCAN_RES` operand. It is not a map header field and is not used in map decoding or normative formulas.
 
 **Terminology.**
-- `step_freq` is the bytecode `SCAN_RES` operand. It is an encoding that may be `0` to request the default `effective_step` of `1`. It is not a map header field.
-- `effective_step` is the resolved numeric dense‑scan step size actually used by the evaluator, decoder, and all normative formulas. It SHALL be `≥ 1`.
-- In the map header, `effective_step` is stored directly as a `u32` at offsets 40–43. The stored value is the resolved `effective_step`, with no further resolution step.
-- Normative formulas SHALL use `effective_step`. `step_freq` appears only where the bytecode `SCAN_RES` operand or its defaulting rule is described.
+- **`step_freq`** is the bytecode `SCAN_RES` operand. It is an encoding that may be `0` to request the default `effective_step` of `1`. It is not a map header field.
+- **`effective_step`** is the resolved program‑wide dense‑scan step size in 10⁻⁵ Hz units. It SHALL be ≥ 1.
+
+Resolution:
+
+- In bytecode / plan‑construction context: from the last `SCAN_RES` before the first zone. A `SCAN_RES` operand of `0`, or absence of `SCAN_RES`, resolves to `1`.
+- If there is no `ZONE` or `SKIP_ZONE` instruction, from the last `SCAN_RES` if one exists, otherwise `1`. This no‑zone value is recorded in the map header but does not affect evaluator behavior.
+- In map‑decoding context: directly from the map header field at offsets 40–43, with no further resolution step.
+
+Normative formulas SHALL use `effective_step`.
+
+`step_freq` is only the raw bytecode `SCAN_RES` operand. It may be `0` to request the default `effective_step = 1`, and it is not a map header field. No formula in this specification uses `step_freq` directly.
+
 **Zone grid alignment (normative).**
  Let `base_freq` be the minimum `freq_low` among all `ZONE` and `SKIP_ZONE` instructions in the program. If the program contains no `ZONE` or `SKIP_ZONE` instructions, `base_freq` SHALL be defined as `0`, and the alignment condition is vacuously satisfied.
 
@@ -973,7 +982,7 @@ When equality holds, the zones are adjacent: the next zone starts at the first g
 
 **`SparseMapBuilder`** is an opaque, thread‑local object that accumulates map entries. Implementations must provide a function to append a map entry in either serialised 16-byte form or an equivalent absolute-frequency internal form, and to finalise the map header.
 
-The canonical 16-byte serialized entry, including `freq_delta_start`, SHALL be produced only by the final map serialization phase, after gap insertion and sparse emission.
+The canonical 16-byte serialized entry, including `freq_delta_start`, SHALL be produced only by the final map serialization phase, after gap insertion and sparse emission. During per‑thread assembly, `freq_delta_start` is not meaningful. See “Absolute‑frequency normalisation” below; entries are represented in absolute frequencies until final serialization.
 
 The `SparseMapBuilder` shall not rely on the `ScratchArena` for storage of the accumulated map entries.  Its contents must survive a `ScratchArena` rewind.  If the implementation uses arena memory for builder‑internal storage, it shall copy the complete entry data to a persistent buffer before any arena rewind occurs.  The partial map returned on error shall be fully valid and readable regardless of the arena state.
 
@@ -1539,6 +1548,9 @@ Every plan that uses the Dynamic Lane **SHALL** embed the exact fuel table shown
 | `DELTA` | LOW | 1 |
 | `LIBREF` | HIGH | 100 |
 | `EXPORT_ORACLE` | HIGH | 100 |
+
+
+*(Informative)* The “Cost Class” column is an implementation‑guidance grouping only. It has no normative meaning; the canonical fuel values in the third column are the sole normative requirement.
 
 **Fuel consumption semantics:**  
 For all opcodes **except `HALT`**, the VM performs the pre‑execution fuel check: before each instruction is executed, the VM checks whether `fuel < instruction_cost`. If so, the VM halts with `GUNZ_FUEL_EXHAUSTED` and **the instruction is not executed**. Otherwise, the instruction is fully executed, and *after* execution, `fuel` is decremented by the instruction's cost.
@@ -2377,7 +2389,7 @@ Long‑jump entries are gaps, not candidates. They contain no evaluated candidat
 
 Sparse‑omitted perfect intervals are evaluated candidates and MAY be plateau members if their central total times satisfy the tolerance.
 
-TThe exact pre‑saturation plateau width is:
+The exact pre‑saturation plateau width is:
 
     stability_width_internal =
         (freq_candidate[right] − freq_candidate[left]) // 10
