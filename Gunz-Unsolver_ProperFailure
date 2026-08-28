@@ -203,6 +203,204 @@ UNSOLVE is the shortcut. It is the warning. It is exactly what you SHALL NOT do.
 
 ## ⚠️ WARNING ⚠️
 
+**This document describes a deliberately flawed, non‑conformant, experimental extension that violates the core principles of GUNZ 5.0.0.**
+
+**Do not use it for calibration, tuning, certification, or any production purpose.**
+
+**It is a cautionary tale and a debugging toy — nothing more.**
+
+---
+
+### 1. Purpose (or Lack Thereof)
+
+GUNZ‑UNSOLVE exists to demonstrate **what happens when you try to cheat the scanner**.
+
+It is an experimental, non‑normative extension that attempts an “inverse query” without enumerating all the mathematical transitions that determine the three core metrics and stability width. The result is a map that is **grossly inaccurate**, **unreliable**, and **dangerously misleading**.
+
+The intended use is:
+- **Educational:** Show why the dense scanner is necessary.
+- **Debugging:** Occasionally useful for “is there maybe something here?” queries, provided the user understands the error bars are enormous.
+- **Cautionary:** A reminder that you cannot out‑math the GUNZ evaluator.
+
+**This is not a tool. It is a warning.**
+
+---
+
+### 2. Overview
+
+GUNZ‑UNSOLVE provides an `UNSOLVE` opcode (0xDE) that answers queries of the form:
+
+> *“Find all frequencies in the range [min_freq, max_freq] where block_time_inaccuracy ≤ max_inaccuracy, jitter ≤ max_jitter, advance_regularity ≤ max_advance_regularity, and stability_width ≥ min_stability_width.”*
+
+The algorithm samples **one representative point per interval of constant `d_lo_cont`**, but it deliberately **ignores the fact that `N_hi` changes whenever `N * T / quantum` crosses an integer within that interval**. This is a **fatal flaw** that makes the map unreliable for `time_unit ≥ 9` and questionable even for coarser scans.
+
+**This is exactly what you SHALL NOT do if you want a correct map.**
+
+---
+
+### 3. The Fatal Flaw
+
+In GUNZ 5.0.0, the three lower‑is‑better metrics and the stability width depend on `N_hi`, which is computed as:
+
+```
+N_hi = Q − N * d_lo_cont
+Q = R / quantum
+R = round(N * T / quantum) * quantum
+```
+
+Even when `d_lo_cont` and `N` are constant, `N * T / quantum` varies continuously with frequency. It crosses integer boundaries frequently (roughly every 6 frequency steps at `time_unit = 9`). Each crossing changes `N_hi`, which changes:
+
+- `block_time_inaccuracy`
+- `jitter`
+- `advance_regularity`
+- `stability_width`
+- central‑direction flags
+
+The UNSOLVE solver **ignores all of these transitions**. It samples one point per `d_lo_cont` interval and assumes the metrics are constant across the entire interval.
+
+**This assumption is false. The resulting map is a hallucination.**
+
+---
+
+### 4. The Opcode (For Completeness)
+
+The `UNSOLVE` opcode (`0xDE`) is defined solely for this anti‑specification.  
+**No conformant GUNZ 5.0.0 implementation will execute it** — the opcode lies outside the defined static and dynamic lane sets, and any compliant runtime will reject the bytecode with `GUNZ_MALFORMED_BYTECODE` before execution.
+
+| Offset | Size | Field | Description |
+|--------|------|-------|-------------|
+| 0 | u8 | opcode | `0xDE` |
+| 1 | u8 | flags | Reserved, must be `0x00` |
+| 2 | u32 | max_block_time_inaccuracy | Maximum allowed absolute deviation, in base time units. `UINT32_MAX` means “no constraint.” |
+| 6 | u8 | max_jitter | Maximum allowed jitter, in base time units. `255` means “no jitter constraint.” |
+| 7 | u16 | max_advance_regularity | Maximum allowed average advance regularity (ticks × 100). `65535` means “no constraint.” |
+| 9 | u32 | min_stability_width_internal | Minimum required stability width, in 0.0001 Hz units. `0` means “any width allowed.” |
+| 13 | u8 | reserved | Must be `0x00` |
+| 14 | u32 | min_freq | Lower bound of the search range, in 10⁻⁵ Hz units. Must be ≥ 1. |
+| 18 | u32 | max_freq | Upper bound of the search range, in 10⁻⁵ Hz units. Must be ≥ min_freq. |
+
+Total size: 22 bytes.
+
+**Note:** The `UNSOLVE` opcode is only defined for `round_mode = 0` (floor). With other rounding modes, additional transition points appear, making the map even less reliable.
+
+---
+
+### 5. Algorithm (The Wrong Way)
+
+The algorithm **deliberately** does the wrong thing:
+
+1. **Edge enumeration:** Enumerates all `d_lo_cont` transition points (but **not** the `N_hi` integer‑crossing points).
+2. **Sampling:** Samples one interior point per `d_lo_cont` interval.
+3. **Assumption:** Assumes the three metrics and stability width are constant across the entire interval.
+4. **Filtering:** Filters intervals based on the sampled metrics.
+5. **Output:** Produces a map that is incorrect for most intervals.
+
+This is exactly what you SHALL NOT do.
+
+---
+
+### 6. Why This Is Wrong
+
+| Correct Approach (GUNZ 5.0.0) | UNSOLVE Approach |
+|----------------------------------|------------------|
+| Enumerate all `N_hi` integer‑crossing points. | Ignores them. |
+| Metrics constant over tiny intervals (~6 steps at `time_unit=9`). | Assumes metrics constant over large `d_lo_cont` intervals. |
+| Map is bit‑identical to a full dense scan. | Map is grossly inaccurate. |
+| Certifiable. | Not certifiable. |
+| Use in production. | **DO NOT USE.** |
+
+---
+
+### 7. What You Should Do Instead
+
+**Use the dense scanner with plateau‑jump optimisation and stability‑width replication, as described in the GUNZ 5.0.0 Performance Implementation Guide.**
+
+The dense scanner:
+- Evaluates every frequency step (or every plateau boundary) correctly.
+- Produces a bit‑identical, certifiable map.
+- Is fast enough for all practical purposes.
+- Is the correct tool for the job.
+
+Alternatively, use the **GUNZ‑ORACLE** companion specification, which solves the inverse problem *correctly* by enumerating all critical points — including `d_lo_cont` boundaries, `N_hi` crossings (with proper handling of all four rounding modes), and jitter‑window expansion. ORACLE produces bit‑identical results that match the dense scan exactly. It is the right way to do what UNSOLVE attempts to cheat.
+
+The UNSOLVE extension is a **trap**. It promises speed but delivers false maps. It is a reminder that you cannot out‑math the GUNZ evaluator.
+
+---
+
+### 8. Metadata Marking (For the Unfortunate)
+
+If, despite all warnings, you produce a map using UNSOLVE, it **must** be marked as follows:
+
+```json
+{
+  "gunz_version": "5.0.0",
+  "map_fingerprint": "...",
+  "creation_timestamp": "...",
+  "session_id": null,
+  "callback_sandboxed": false,
+  "solver_mode": "unsolve_anti_spec",
+  "solver_algorithm": "GUNZ-UNSOLVE draft 0.7",
+  "fidelity": "zero",
+  "fidelity_note": "This map is deliberately incorrect. It ignores N_hi integer-crossing transitions within constant d_lo_cont intervals. DO NOT USE for any purpose other than debugging or education.",
+  "approximate_note": "This map is a hallucination. It may show stable regions that do not exist and may miss regions that are stable. Use only to demonstrate why the dense scanner is necessary.",
+  "warning": "EXACTLY WHAT YOU SHALL NOT DO.",
+  "max_block_time_inaccuracy": 500,
+  "max_jitter": 5,
+  "max_advance_regularity": 50,
+  "min_stability_width_internal": 500,
+  "min_freq": 20000000,
+  "max_freq": 30000000
+}
+```
+
+All other GUNZ 5.0.0 metadata requirements (§4.6) apply unchanged; the fields above are additional mandatory markers for any UNSOLVE‑produced map.
+
+---
+
+### 9. Philosophical Note
+
+The UNSOLVE extension exists because the temptation to “cheat” the scanner is universal.
+
+- *“Surely we can skip some points?”*
+- *“The metrics must be smooth, right?”*
+- *“What if we just sample the middle of each interval?”*
+
+The answer is **no**. The GUNZ metrics are not smooth. They are fine‑grained, integer‑based, piecewise‑constant functions with transitions at every integer‑crossing of `N * T / quantum`. The dense scanner with plateau‑jump is the correct solution. There is no shortcut that preserves accuracy.
+
+UNSOLVE is the shortcut. It is the warning. It is exactly what you SHALL NOT do.
+
+---
+
+### 10. Conformance Statement
+
+**This extension is non‑normative and deliberately non‑conformant.** It is not part of the GUNZ 5.0.0 core specification. Implementations that support `UNSOLVE` must mark the output maps as non‑canonical and zero fidelity as described in §8.
+
+**Conformance to GUNZ 5.0.0 does not require support for UNSOLVE.** In fact, conformant implementations are **discouraged** from implementing it, as it undermines the trust model of the GUNZ ecosystem.
+
+---
+
+### 11. Final Warning
+
+> **Exactly what you SHALL NOT DO.**
+>
+> This extension exists to show you the cliff so you do not walk off it.
+>
+> **Do not use UNSOLVE for calibration.**
+> **Do not use UNSOLVE for tuning.**
+> **Do not use UNSOLVE for certification.**
+> **Do not trust a map produced by UNSOLVE.**
+>
+> The dense scanner is your only path to truth.
+
+---
+
+*This document is a cautionary tale. It is not a specification. It is a warning. Use it only to understand why the dense scanner exists.*# GUNZ‑UNSOLVE: The Anti‑Specification  
+*“Exactly what you SHALL NOT do.”*
+
+---
+
+## ⚠️ WARNING ⚠️
+
 **This document describes a deliberately flawed, non‑conformant, experimental extension that violates the core principles of GUNZ 3.80.0.**
 
 **Do not use it for calibration, tuning, certification, or any production purpose.**
