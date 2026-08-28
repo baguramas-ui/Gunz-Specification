@@ -15,7 +15,7 @@ Co-authored by DeepSeek and Corentin Amice.
 
 ---
 
-# GUNZ 5.0.0B — Graduated Underlying Navigation Zones -
+# GUNZ 5.0.0C — Graduated Underlying Navigation Zones -
 **ISA · Runtime · Library**
 
 ---
@@ -1999,7 +1999,7 @@ Under the current bounds, this case cannot occur.
 
    *(The `jitter` field is stored as a `u8` and saturates at 255 base‑time units.  For coarse time units such as seconds (`time_unit = 0`), this saturation limit may be reached even for moderately irregular scans.  Users should choose a `time_unit` that keeps expected jitter values within the representable range, or consult the raw `.gunzstats` file for full‑precision data.)*  
 
-   Advance regularity is computed from the counts `N_lo` (where `N_lo = N − N_hi`) and `N_hi` using a closed‑form multiset variance. Each advance value (in ticks) is scaled by 100, yielding two values `a = 100 × adv_lo` and `b = 100 × adv_hi`. **The values `a` and `b` SHALL always be `100 × adv_lo_cont` and `100 × adv_hi_cont`, regardless of whether a `DELTA` override is active. The `DELTA` override affects only the block‑time sum; it does not alter advance regularity.** The advance regularity for this jitter point is the population standard deviation of the multiset consisting of `N_lo` copies of `a` and `N_hi` copies of `b`, computed via the integer standard deviation algorithm of §4.5.3. **This per‑point value remains full‑precision (in ticks × 100).**  
+   Advance regularity is computed from the counts `N_lo` (where `N_lo = N − N_hi`) and `N_hi` using a closed‑form multiset variance. Each advance value (in ticks) is scaled by 100, yielding two values `a = 100 × adv_lo` and `b = 100 × adv_hi`. **The values `a` and `b` SHALL always be `100 × adv_lo_cont` and `100 × adv_hi_cont`, regardless of whether a `DELTA` override is active. The `DELTA` override affects only the block‑time sum; it does not alter advance regularity.** The advance regularity for this jitter point is the population standard deviation of the multiset consisting of `N_lo` copies of `a` and `N_hi` copies of `b`,computed via the advance‑regularity two‑valued closed form defined in §4.5.3. **This per‑point value remains full‑precision (in ticks × 100).**  
 
 **Averaging and saturation:**
 The full‑precision per‑point advance regularity values across all valid jitter points are averaged using half‑to‑even rounding. For storage in the map entry, this average is saturated to 65535 and written to the `advance_regularity` field. The maximum of the full‑precision per‑point values (before averaging) is saturated to 65535 and stored in `peak_advance_regularity`.
@@ -2015,7 +2015,7 @@ All saturation occurs after the full‑precision computations and does not affec
 Collect *all* **total block times** (`total_time_i`, raw block time plus hold/sep contribution) from *all* valid jitter points across the entire measurement window into a single multiset. The candidate's `jitter` is the population standard deviation of that combined multiset, computed via §4.5.3.  
 
    – **Advance regularity:** 
-For each jitter point, collect all per‑cycle advance values (each expressed as `a = 100 × adv_lo` or `b = 100 × adv_hi`) from all blocks evaluated in the temporal window into a single multiset. Compute the population standard deviation of that combined multiset using the algorithm of §4.5.3. **This full‑precision value (ticks × 100) is the per‑jitter‑point advance regularity.**  
+For each jitter point, collect all per‑cycle advance values (each expressed as `a = 100 × adv_lo` or `b = 100 × adv_hi`) from all blocks evaluated in the temporal window into a single multiset. Compute the population standard deviation of that combined multiset using the advance‑regularity two‑valued closed form defined in §4.5.3. **This full‑precision value (ticks × 100) is the per‑jitter‑point advance regularity.**  
 
 Then average these full‑precision per‑point values across all valid jitter points, using half‑to‑even rounding. This full‑precision average is:
 - saturated to `65535` and stored in `advance_regularity`;
@@ -3244,27 +3244,52 @@ All multiplications, divisions, and comparisons in Steps 1–5 SHALL use 128‑b
 
 The final `σ` is the correctly rounded integer standard deviation in the same unit as the input values.
 
+ The general sample‑by‑sample algorithm above SHALL be used for jitter and for any other metric whose sample values are not a two‑valued multiset. Advance regularity SHALL use the closed form defined below and SHALL NOT use the general sample‑by‑sample `S`/`S2` accumulation.
 
-**Accumulator width relaxation (informative for implementers):**
-The algorithm as defined uses 128‑bit and 256‑bit intermediates to guarantee exactness for all possible inputs up to the normative maximums. An implementation **may** use narrower intermediates (e.g., 128‑bit for the variance numerator) **if and only if** it can mathematically prove that the resulting standard deviation is bit‑identical to the output of the algorithm above for all inputs within the normative bounds. The burden of proof rests with the implementer; a conformant test suite will expect bit‑identical results.
+**Advance Regularity Variance Computation (Normative)**
 
-*(Informative)* The normative evaluator bounds on `MAX_N`, `window_duration`, and `jitter_window_radius` ensure that the number of samples and each sample value keep the 128‑bit sum `S` within range. This algorithm is not intended as a general‑purpose unbounded standard deviation function.
+Advance regularity is always computed from a two‑valued multiset.
+
+The two distinct values are:
+
+```text
+a = 100 × adv_lo_cont
+b = 100 × adv_hi_cont
+```
+
+with multiplicities:
+
+```text
+n_a = N_lo
+n_b = N_hi
+```
+
+where:
+
+```text
+n = n_a + n_b
+```
+
+The variance numerator and denominator SHALL be computed directly as:
+
+```text
+V = n_a · n_b · (a − b)²
+D = n²
+```
+
+All products in these formulas SHALL use 256‑bit unsigned arithmetic.
+
+The implementation SHALL then apply the exact rational standard deviation rounding and square‑root steps of §4.5.3 that follow the variance numerator computation, using these `V` and `D`.
+
+The general sample‑by‑sample `S`/`S2` accumulation SHALL NOT be used for advance regularity. 
 
 **Fixed‑point scaling for advance regularity:**
+
 Advance regularity samples are provided in ticks × 100 (i.e., the actual tick values multiplied by 100). The standard deviation output is therefore also in ticks × 100.
+
 For detrimental threshold comparison, the evaluator SHALL convert the full‑precision average advance regularity to base time units using the formula for `advance_regularity_btu` defined in §3.11. That conversion multiplies by `mult_den × quantum` and divides by `mult_num × 100`, using half‑to‑even rounding.
+
 This derived value is used only for the detrimental advance‑regularity threshold.
-
-**Permitted optimisation for two‑valued multisets (advance regularity):**
-For the special case where the multiset contains only two distinct values `a` and `b`, with multiplicities `n_a` and `n_b` (and `n = n_a + n_b`), implementations MAY compute the variance numerator directly as:
-
-    V = n_a · n_b · (a − b)²
-    D = n²
-
-and then apply Step 4 and Step 5 of this section exactly as in the general algorithm.
-
-No other shortcut is permitted.
-
 
 ---
 
@@ -4156,6 +4181,22 @@ A compliant implementation **SHALL**:
 | **Recorded in map** | Stored in the `reference_block_time` field of the map header, with `reference_source` set to `2` if produced by the guessing rule. | Stored in the `reference_block_time` field, with `reference_source` set to `3` (Calibrated Reference). |
 | **Fingerprint** | Included in the map's XXH3‑128 identity. | Included in the next map's fingerprint, making the two maps distinct. |
 
+
+ *(Informative) Algorithmic shortcuts permitted by this specification:*
+
+ 1. **Grouped long‑term jitter accumulators.** 
+In core long‑term mode without a drift companion, every temporal block at a given jitter offset is identical. Implementations may compute the jitter multiset as `J` distinct sample values, each repeated `m_j` times, and accumulate:
+    `S = Σ(m_j × total_time_j)`, `S2 = Σ(m_j × total_time_j²)`, `n = Σ m_j`.
+    This is algebraically identical to the sample‑by‑sample algorithm.
+
+ 2. **O(1) long‑term central total time.**
+ Without drift or similar extension, the long‑term central total time at a jitter offset equals the single per‑block `total_time`. The mean collapse is exact.
+
+ 3. **Closed‑form or binary‑search N‑search.** 
+The monotonic search may be replaced by binary search over `[N0, MAX_N]`, because `actual_advance` is nondecreasing in `N`. More aggressive O(1) or O(log mult_num) closed forms are permitted only if they provably produce identical `N`, `N_hi`, flags, and sentinels for every supported rounding mode.
+
+ All shortcuts must preserve bit‑identical map and `.gunzstats` output. Under GUNZ‑DRIFT or any companion that varies block parameters, shortcuts 1 and 2 must be disabled or proven equivalent for that companion.
+
 ---
 
 ## 8. Long‑Running Guarantees
@@ -4721,4 +4762,4 @@ A real snapshot must also include a `signature` key (byte string of 64 bytes) pl
 
 ---
 
-*GUNZ 5.0.0B — Graduated Underlying Navigation Zones — specification complete.*
+*GUNZ 5.0.0C — Graduated Underlying Navigation Zones — specification complete.*
