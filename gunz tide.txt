@@ -1,0 +1,491 @@
+# GUNZ‑TIDE 1.1.6 — Phase‑Selection and Multi‑Map Robustness Companion
+
+*Companion to GUNZ 5.0.0*
+
+---
+
+## Version History
+
+- **v1.1.6:** Clarified that `tide_central_flip_counts` includes only candidates evaluated in all phases. Clarified `.gunztide` emission when no phase is admissible.
+- **v1.1.5:** Clarified that callback failure aborts the entire TIDE run and discards all partial output. Made iteration budget multiplication use truncated per‑zone candidate counts. Renamed “Phase 0 nominal map” to “nominal static map computed from `P0`” for export clarity. Made `.gunztide` absence explicit on callback abort.
+- **v1.1.4:** Corrected the per‑candidate central flip count from a fractional total‑variation formula to a strictly integer transition count. Flips now count only direct `+1 ↔ −1` phase transitions.
+- **v1.1.3:** Fixed `PURE_CALL` suppression contradiction during gating/ranking. Clarified `EXPORT` Phase 0 independence. Defined `tide_central_flip_counts` aggregate structure. Added informative notes for nominal `reference_source = 0` and large `N_phases`. Made `round_mode` non‑overridable.
+- **v1.1.2:** Fixed `reference_source` rules for overridden `reference_block_time`. Defined zero‑candidate phase discarding. Added strict `tide_metric_preference` validation. Specified `.gunztide.tide_phase_summaries` object structure. Clarified inherited `reference_source`.
+- **v1.1.1:** Fixed iteration budget multiplication overflow by mandating 128‑bit unsigned arithmetic and saturating the product to `2⁶⁴−1`. Clarified that no normative `N_phases` cap is imposed.
+- **v1.1.0:** Incorporated candidate‑scope correction for sparse‑omitted intervals, defined `EXPORT` semantics in TIDE plans, clarified `peak_advance_regularity` as optional extension ranking key, tightened iteration‑budget wording, and added all remaining normative details from the final audit.
+- **v1.0.0:** Initial proposed architecture: multi‑phase evaluation, gates, preference ranking, and selected map output.
+
+---
+
+## 1. Overview
+
+GUNZ‑TIDE performs a **tide scan**: it evaluates a scan under multiple deterministic parameter configurations, called **phases**, filters those phases using user‑supplied gates, ranks the surviving phases according to a user‑declared metric preference, and outputs a set of standard static GUNZ maps for the selected phases.
+
+TIDE does **not** produce an aggregated map. It does **not** combine metrics across phases. Each output map is a complete, core‑compatible `.gunzmap` for its own phase.
+
+This preserves GUNZ 5.0.0’s deterministic three‑metric plus stability‑width model, and leaves downstream decisions to tools such as DEWASTER or user‑specific agents.
+
+---
+
+## 2. Configuration
+
+A tide scan is requested through plan construction input, not bytecode.
+
+```json
+{
+  "tide_enabled": true,
+  "tide_metric_preference": [
+    "block_time_inaccuracy",
+    "jitter",
+    "advance_regularity",
+    "stability_width"
+  ],
+  "tide_gates": {
+    "block_time_inaccuracy_max": 500,
+    "jitter_max": 20,
+    "advance_regularity_max": 100,
+    "stability_width_min": 0
+  },
+  "tide_output_map_count": 2,
+  "tide_phases": [
+    {},
+    { "reference_block_time": 248001005 },
+    { "quantum": 2 },
+    { "mult_num": 5, "mult_den": 4 }
+  ]
+}
+```
+
+### 2.1 Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tide_enabled` | boolean | If absent or `false`, the scan is static. |
+| `tide_metric_preference` | array of strings | Ordered list containing each core metric name exactly once plus optionally `"peak_advance_regularity"`. |
+| `tide_gates` | object | Optional. Keys are metric names with bounds; see §4. |
+| `tide_output_map_count` | positive integer | Number of selected phase maps to emit. Must be ≥ 1. |
+| `tide_phases` | array of objects | Phase override objects. Minimum length: 2. No normative upper bound. |
+
+`tide_metric_preference` SHALL contain exactly the four core metric names:
+
+- `block_time_inaccuracy`
+- `jitter`
+- `advance_regularity`
+- `stability_width`
+
+each exactly once. It MAY also contain `"peak_advance_regularity"` exactly once. No other entries are permitted.
+
+If the array does not satisfy these constraints, plan construction SHALL fail with `GUNZ_INVALID_LIBRARY`.
+
+### 2.2 Phase Override Object
+
+Each phase object may contain the following keys:
+
+| Key | Type |
+|-----|------|
+| `reference_block_time` | u32 |
+| `quantum` | u32 |
+| `mult_num` | u32 |
+| `mult_den` | u32 |
+| `hold_cycles` | u8 |
+| `sep_cycles` | u8 |
+| `target_ticks` | u32 |
+
+Any unsupported key SHALL cause plan construction to fail with `GUNZ_INVALID_LIBRARY`.
+
+`round_mode` SHALL NOT be overridden by any TIDE phase; it is inherited from `P0` for all phases.
+
+The first phase SHOULD be `{}` (nominal), but this is not required. Phase 0 is always treated as one phase among others; it has no special status.
+
+---
+
+## 3. Effective Parameter Resolution
+
+For each phase `p`, the effective parameter set `P_p` is formed from the nominal merged parameters `P0` (GUNZ 5.0.0 §3.10) by applying the phase override object:
+
+- An override key replaces the corresponding field entirely.
+- Absent keys remain at `P0`.
+- Overrides are applied **after** all other resolution (library merge, `LIBREF`, VM overrides, etc.).
+- No interpolation or blending.
+
+After applying all overrides, `P_p` must satisfy all core plan‑validation rules:
+
+- `quantum ≥ 1`
+- `target_ticks ≥ 1`
+- `mult_num ≠ 0`
+- `mult_den ≠ 0`
+- `time_unit ≤ 12`
+- `reference_block_time ≤ UINT32_MAX`
+- `hold_cycles`, `sep_cycles` within u8
+
+If any phase fails validation, plan construction SHALL fail with `GUNZ_INVALID_LIBRARY`.
+
+`window_duration` SHALL NOT be modifiable by TIDE 1.1.6. If a phase attempts to override it, plan construction SHALL fail with `GUNZ_INVALID_LIBRARY`.
+
+For long‑term scans, each phase’s `max_eval_iterations` SHALL be recomputed from:
+
+```text
+max_eval_iterations_p = ceil(nominal_window_duration / quantum_p)
+```
+
+using 128‑bit unsigned arithmetic, saturated to `2⁶⁴ − 1`, exactly as core §3.4.1.
+
+**Reference source rules:**
+
+- For any phase that does **not** override `reference_block_time`, the effective `reference_source` SHALL be the nominal `reference_source` inherited from `P0`.
+- For any phase that **does** override `reference_block_time`:
+  - If the override value is exactly equal to the nominal `reference_block_time` from `P0`, the phase SHALL retain the nominal `reference_source`.
+  - Otherwise, the phase’s `reference_source` SHALL be set to `1` (explicit).
+- A phase override of `reference_block_time` to `0` SHALL cause plan construction to fail with `GUNZ_INVALID_LIBRARY`. A scan with evaluated candidates must have a positive reference when a non‑zero `reference_source` is used, and tide phases are always evaluated.
+
+*(Informative)* If `P0` has `reference_source = 0` and `reference_block_time = 0`, all phases inherit these values. Such a tide scan will have no evaluated candidates and therefore no selected maps; this is a valid but degenerate configuration.
+
+---
+
+## 4. Gates
+
+`tide_gates` is an optional object. Each key is one of:
+
+| Key | Bound type |
+|-----|------------|
+| `block_time_inaccuracy_max` | lower‑is‑better |
+| `jitter_max` | lower‑is‑better |
+| `advance_regularity_max` | lower‑is‑better |
+| `peak_advance_regularity_max` | lower‑is‑better |
+| `stability_width_min` | higher‑is‑better |
+
+If a key is absent, that gate is inactive.
+
+A phase `p` is **admissible** if, for every successfully evaluated dense‑stream candidate in included zones, all gated metrics satisfy their bounds. Comparisons use **full‑precision internal values**, not saturated map fields.
+
+The candidate scope for gates and summaries SHALL be **successfully evaluated dense‑stream candidates**:
+
+- Included: ordinary evaluated candidates, sparse‑omitted perfect intervals later represented by type‑1 long‑jump entries, and sparse‑omitted intervals later folded into positive `freq_delta_start`.
+- Excluded: `FLAG_INVALID` entries, `FLAG_SKIPPED` placeholders, and type‑0 long‑jump gaps.
+
+A phase that has **zero successfully evaluated dense‑stream candidates** SHALL be discarded as inadmissible, regardless of whether all gates would otherwise be satisfied vacuously.
+
+Such a phase produces no summary vector, is not ranked, and cannot be selected.
+
+A phase that fails any gate is discarded and produces no map.
+
+---
+
+## 5. Evaluation, Ranking, and Selection
+
+### 5.1 Evaluation
+
+For each phase `p`, run the complete GUNZ 5.0.0 Phase 1 and Phase 2 algorithms over all included zones using `P_p`.
+
+During the gating/ranking evaluation, any `PURE_CALL` attached to a zone SHALL be **ignored**: no callback is invoked, and its return value has no effect on gating or ranking. This temporary suppression does not alter map content; it only prevents callback execution before final selection.
+
+Store full‑precision per‑candidate metrics:
+
+- `block_time_inaccuracy_cp`
+- `jitter_cp`
+- `avg_advance_regularity_cp`
+- `peak_advance_regularity_cp`
+- `stability_width_internal_cp`
+- central flags (above/below/exact)
+
+No saturation occurs at this stage.
+
+### 5.2 Phase summary vector
+
+For each admissible phase `p`, compute a summary vector over all successfully evaluated dense‑stream candidates:
+
+For lower‑is‑better metrics:
+
+```text
+summary_M_p = max over candidates of M_cp
+```
+
+For `stability_width_internal` (higher‑is‑better):
+
+```text
+summary_W_p = min over candidates of W_cp
+```
+
+This summary represents the worst candidate in the phase for that metric.
+
+If a phase has zero successfully evaluated dense‑stream candidates, that phase is discarded and no summary is computed for it.
+
+If **all** phases have zero successfully evaluated dense‑stream candidates, the run returns `GUNZ_OK`, emits no selected maps, and records an empty selection.
+
+*(Informative)* The conservative max/min summary may tie when two phases produce identical extreme values, especially when lower‑is‑better metrics saturate. Future revisions may add optional distribution‑aware summaries, such as arithmetic mean, percentiles, or non‑saturated density measures, without breaking existing maps or metadata. Such extensions would be additive and explicitly declared in their own specification version.
+
+### 5.3 Ranking
+
+Rank admissible phases using lexicographic comparison over `tide_metric_preference`.
+
+For two phases `a` and `b`:
+
+1. Compare the first metric in the preference list.
+   - For lower‑is‑better: smaller summary wins.
+   - For `stability_width`: larger summary wins.
+2. If equal, move to the next metric.
+3. If all metrics equal, the smaller phase index wins.
+
+This produces a strict total order.
+
+If no phase summaries exist (empty scan), ranking is by **ascending phase index only**. However, since zero‑candidate phases are discarded, this situation only occurs if all phases are discarded, in which case there is nothing to rank.
+
+### 5.4 Selection
+
+Select the first `tide_output_map_count` phases from the ranked list.
+
+If fewer admissible phases exist than `tide_output_map_count`, all admissible phases are selected.
+
+If no phase is admissible, the run returns `GUNZ_OK`, emits no `.gunzmap` or `.gunzmeta` files, but still writes the `.gunztide` file with empty `tide_admissible_phase_indices` and `tide_selected_phase_indices`.
+
+---
+
+## 6. Output Generation
+
+### 6.1 Selected phase maps
+
+For each selected phase `p`:
+
+- Generate a complete static `.gunzmap` using `P_p`.
+- The map header uses `P_p` for all fields (`reference_block_time`, `quantum`, etc.).
+- The map entries, flags, stability width, and drift are those computed for phase `p`.
+- The map is bit‑identical to a static scan performed with `P_p`.
+
+The XXH3‑128 map fingerprint is computed normally from the phase map header, as in GUNZ 5.0.0 §4.3. Tide configuration does not alter the fingerprint.
+
+### 6.2 Per‑map metadata
+
+Each emitted `.gunzmap` SHALL have its own `.gunzmeta` file, following GUNZ 5.0.0 §4.6, using the selected phase’s parameters.
+
+Additionally, each per‑map `.gunzmeta` SHALL include:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `tide_enabled` | boolean | `true` |
+| `tide_phase_index` | integer | Index of this phase in `tide_phases` |
+| `tide_phase_count` | integer | Total number of phases |
+| `tide_metric_preference` | array | The preference order |
+| `tide_gates` | object | The gating configuration |
+| `tide_selected_phase_indices` | array | Ordered selected phase indices |
+| `tide_output_map_count` | integer | Number of maps selected |
+
+These fields are deterministic.
+
+### 6.3 Run‑level metadata
+
+A separate `.gunztide` JSON file SHALL be produced, serialised according to RFC 8785, containing:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `gunz_version` | string | `"5.0.0"` |
+| `tide_version` | string | `"1.1.6"` |
+| `tide_phases` | array | Original phase configuration |
+| `tide_metric_preference` | array | Preference order |
+| `tide_gates` | object | Gates used |
+| `tide_admissible_phase_indices` | array | All phases that passed gates, in ranked order |
+| `tide_selected_phase_indices` | array | Final selected phases |
+| `tide_phase_summaries` | object | Summary vector for each admissible phase; omitted if no phases are admissible |
+| `tide_central_flip_counts` | object | Optional aggregate central‑direction flip metrics |
+
+`tide_phase_summaries` is an object whose keys are the decimal string representations of admissible phase indices (e.g., `"0"`, `"1"`). Each value is an object with the following keys:
+
+- `block_time_inaccuracy` (integer)
+- `jitter` (integer)
+- `advance_regularity` (integer)
+- `peak_advance_regularity` (integer, optional if used in preference/gates)
+- `stability_width_internal` (integer)
+
+All values are full‑precision summary values as defined in §5.2. If no phase is admissible, this object is absent.
+
+`tide_central_flip_counts` is an optional object containing aggregate central‑direction flip metrics over all successfully evaluated dense‑stream candidates and all phases. It SHALL contain:
+
+- `total_flips` (integer): sum over candidates of per‑candidate phase flip counts.
+- `max_flips` (integer): maximum per‑candidate phase flip count.
+- `candidates_with_flips` (integer): number of candidates with a phase flip count of at least `1`.
+
+A per‑candidate phase flip count is defined as the number of adjacent phase pairs `(p, p+1)` where the candidate changes from strictly above the reference in one phase to strictly below the reference in the next phase, or vice versa.
+
+```text
+flips_candidate =
+    count of p in [0, N_phases−2]
+    where (I_p = +1 and I_{p+1} = −1)
+       or (I_p = −1 and I_{p+1} = +1)
+```
+
+where `I_p` is `+1` if the candidate is central‑above in phase `p`, `−1` if central‑below, and `0` if exact.
+
+Transitions that pass through the exact state (`+1 → 0 → −1`) do **not** count as flips, because the candidate touches the reference boundary without reversing around it.
+
+A candidate is included in `tide_central_flip_counts` only if it is successfully evaluated in **all** phases. If a candidate is missing from any phase, it is excluded from the flip‑count aggregate.
+
+If no candidates are evaluated, this object SHALL be omitted.
+
+The `.gunztide` file is informational and not part of the `.gunzmap` identity. It does not affect the map fingerprint.
+
+### 6.4 File naming
+
+For a given output base name `B`:
+
+```text
+B.tide<phase_index>.gunzmap
+B.tide<phase_index>.gunzmeta
+B.gunztide
+```
+
+`phase_index` is decimal, zero-padded to at least 2 digits (e.g., `tide00`, `tide01`, `tide12`).
+
+Two selected phases may produce identical canonical map files. They SHALL still be written under distinct names because the phase index differs. Storage‑layer deduplication is permitted, but the logical output set is fixed.
+
+---
+
+## 7. Iteration Budget
+
+TIDE performs its own single‑threaded pre‑pass using the same deterministic zone ordering and budget‑walk rules as GUNZ 5.0.0 §3.11, but each zone’s **truncated** candidate count — after applying the per‑zone `max_scan_iterations` limit — is multiplied by `N_phases` before the budget walk.
+
+The multiplication `zone_truncated_candidates × N_phases` SHALL be performed using **128‑bit unsigned arithmetic**. The product SHALL then be saturated to `2⁶⁴ − 1` before any comparison with `total_max_scan_iterations`.
+
+This prevents silent wraparound for unbounded `N_phases` and preserves the no‑cap design.
+
+Total candidate evaluations across all phases = `N_phases × Σ included_zone_candidates`.
+
+Excluded zones are represented in each phase map by type‑0 long‑jump entries, exactly as in a static scan.
+
+If the run returns `GUNZ_ITERATION_LIMIT_EXCEEDED`, selected maps for included zones may still be emitted, and `.gunztide` records the situation.
+
+No additional normative limit is imposed on `N_phases`.
+
+*(Informative)* Very large `N_phases` values may exceed the global iteration budget for all zones, resulting in no evaluated candidates. Users SHOULD choose `N_phases` commensurate with available resources and expected scan budget.
+
+---
+
+## 8. Deferred Operations
+
+Deferred operations (`ORACLE`, `EXPORT_ORACLE`, `EXPORT`, `IMPORT`, `STREAM`) SHALL execute **once per plan**, after all phase evaluations and selections are complete.
+
+- For `ORACLE`, `EXPORT_ORACLE`, `IMPORT`, and `STREAM`, they use the nominal parameter set `P0`.
+- For `EXPORT`, the operation SHALL write the **nominal static map computed from `P0`**, using the same object table/export semantics as a static plan with `tide_enabled = false`.
+- Selected phase maps are written directly by the TIDE orchestrator using the deterministic file naming rule.
+- `EXPORT` SHALL NOT write aggregated maps, selected maps, or any phase other than the nominal static map computed from `P0`.
+
+The nominal static map computed from `P0` is produced independently of the TIDE selection process and MAY be emitted even if the phase whose override object is `{}` is not admissible or not selected. Its `.gunzmeta` and `.gunzstats` (if generated) follow standard static‑scan rules.
+
+---
+
+## 9. Callback Interaction
+
+`PURE_CALL` callbacks are **not invoked** during gating and ranking. This suppression is normative and applies even though the core Phase 1 evaluator would normally invoke an attached callback. During gating/ranking, callback execution is disabled as specified in §5.1.
+
+Callbacks are invoked **only during final map generation for selected phases**, exactly as in a normal static scan for that phase.
+
+The callback may read and write the 16‑byte core candidate context, but all writes are ignored for map generation. Its return value may abort the run.
+
+If a callback returns `GUNZ_CALLBACK_FAILED` or `GUNZ_SANDBOX_VIOLATION` during final map generation for **any** selected phase, the entire TIDE run SHALL abort immediately.
+
+All selected maps already written for earlier phases, all pending selected maps, and the run‑level `.gunztide` output SHALL be discarded. The `.gunztide` file SHALL be absent from the final output.
+
+The callback error SHALL be returned to the caller. No partial TIDE output is retained.
+
+This matches the core GUNZ 5.0.0 static‑scan abort semantics: a callback failure is terminal for the entire plan, not phase‑specific.
+
+---
+
+## 10. Attestation Boundaries
+
+Each selected phase map’s `.gunzmeta` is attested independently, following core §4.10, using that phase’s parameters and sandboxing state.
+
+`.gunztide` is informational and SHALL NOT be included in any map attestation signature.
+
+`stats_fingerprint` in each per‑phase `.gunzmeta` refers to that phase’s `.gunzstats` / `.gunzstatz`, if present.
+
+---
+
+## 11. Conformance
+
+A conformant GUNZ‑TIDE 1.1.6 implementation SHALL:
+
+- Produce bit‑identical selected maps to static scans performed with the same phase parameters.
+- Apply gates using full‑precision internal values over successfully evaluated dense‑stream candidates.
+- Exclude `FLAG_INVALID`, `FLAG_SKIPPED`, and type‑0 long‑jump gaps from gate and summary candidate scope.
+- Include sparse‑omitted perfect intervals and positive‑delta sparse‑omitted intervals.
+- Discard phases with zero successfully evaluated dense‑stream candidates.
+- Compute phase summaries as max over candidates for lower‑is‑better metrics and min for stability width.
+- Rank phases using the exact lexicographic preference order and deterministic tie‑breaking.
+- Select exactly `tide_output_map_count` phases when enough admissible phases exist.
+- Emit a `.gunztide` file in RFC 8785 canonical JSON with the specified structure, unless a callback abort occurs.
+- Enforce the iteration budget multiplication using truncated per‑zone candidate counts, 128‑bit unsigned arithmetic, and saturation to `2⁶⁴−1`.
+- Not invoke callbacks during ranking or gating.
+- Abort the entire run and discard all output if a callback fails during final map generation for any selected phase.
+- Preserve the standard GUNZ 5.0.0 map fingerprint and checksum for each selected map.
+- Treat deferred `EXPORT` as writing only the nominal static map computed from `P0`.
+- Apply the correct `reference_source` rules for phase overrides.
+- Include only candidates evaluated in all phases in `tide_central_flip_counts`.
+
+Support for GUNZ‑TIDE is optional for GUNZ 5.0.0 conformance.
+
+---
+
+## 12. Example
+
+Configuration:
+
+```json
+{
+  "tide_enabled": true,
+  "tide_metric_preference": [
+    "block_time_inaccuracy",
+    "jitter",
+    "advance_regularity",
+    "stability_width"
+  ],
+  "tide_gates": {
+    "block_time_inaccuracy_max": 500,
+    "jitter_max": 20
+  },
+  "tide_output_map_count": 1,
+  "tide_phases": [
+    {},
+    { "reference_block_time": 248001005 },
+    { "quantum": 2 }
+  ]
+}
+```
+
+The scan evaluates three phases, discards any phase with inaccuracy > 500 or jitter > 20, ranks remaining phases by inaccuracy then jitter, and outputs the best single map.
+
+If the selected phase uses `{}`, its map header uses the nominal parameters. If the selected phase uses `reference_block_time = 248001005`, its map header uses that value. Both maps are fully standard static maps.
+
+---
+
+## Appendix A — Mathematical Foundations *(Informative)*
+
+### A.1 Scenario‑Based Robust Optimisation
+
+Worst‑candidate phase summaries and gates implement a discrete minimax / maximin model over the phase set.
+
+For lower‑is‑better metrics:
+
+```text
+min_f max_p M_p(f)
+```
+
+For stability width:
+
+```text
+max_f min_p W_p(f)
+```
+
+### A.2 Multi‑Parametric Sensitivity on a Discrete Lattice
+
+GUNZ metrics are integer step functions. TIDE phases form a discrete perturbation grid; each phase is a forward‑difference observation relative to the nominal phase.
+
+### A.3 Discrete Expectation Integration
+
+If a future TIDE extension adds an average mode, it would compute the arithmetic mean over the discrete phase distribution. The current 1.1.6 uses only max/min summaries to avoid incompatible unit mixing.
+
+### A.4 Topological Bifurcation Index
+
+Central direction flip counts across phases are the count of direct `+1 ↔ −1` transitions, useful for identifying knife‑edge operating points. They are recorded in `.gunztide` metadata.
+
+---
+
+*GUNZ‑TIDE 1.1.6 — Phase‑Selection and Multi‑Map Robustness Companion — complete.*
