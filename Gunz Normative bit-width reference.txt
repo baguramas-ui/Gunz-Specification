@@ -23,6 +23,8 @@ GUNZ 5.0.0 is a major revision. Relative to earlier GUNZ versions, the following
 
 - **`.gunzstats` record expanded to 96 bytes** with `u128` accumulators for sums and sums‑of‑squares, and a new `u64` `advance_regularity_full` field. These are specified to saturate at `2¹²⁸−1` rather than wrap.
 
+- **Advance regularity now uses the mandatory two‑valued closed form.** It has no `S` or `S2` accumulator. Only `V` and `D` are computed, both in 256‑bit arithmetic. The general sample‑by‑sample algorithm is used only for total block‑time jitter and other non‑two‑valued metrics.
+
 ---
 
 ## Normative Bit‑Width Requirements
@@ -40,10 +42,12 @@ GUNZ 5.0.0 is a major revision. Relative to earlier GUNZ versions, the following
 | `total_time`, `|total_time − reference_block_time|` | **128‑bit** | Computed with 128‑bit arithmetic; result saturated to `UINT32_MAX` for storage. |
 | `block_time_inaccuracy` (long‑term exact rational mean) | **256‑bit** | `sum_total` and `ref_scaled` use 256‑bit unsigned; division half‑to‑even. |
 | `advance_regularity_btu` numerator | **128‑bit** | `(avg_advance_regularity_internal × mult_den × quantum)`. Under caps: max ≈ 5.9×10²², far below 2¹²⁸. |
-| Sum `S = Σ xᵢ` (standard deviation) | **128‑bit** | For `n ≤ 2⁶⁴`, `xᵢ ≤ 2⁶⁴`, the sum fits in 128‑bit under current caps. |
-| Sum of squares `S2 = Σ (xᵢ)²` (standard deviation) | **256‑bit** | Each `xᵢ²` can be up to 2¹²⁸; the sum may exceed 2¹²⁸. |
-| Variance numerator `V = n·S2 − S²` | **256‑bit** | Both `n·S2` and `S²` are 256‑bit quantities. |
-| `D = n²` | **256‑bit** | `n` up to 2³¹, `n²` up to 2⁶²; but `n` could be larger in theory, use 256‑bit. |
+| Sum `S = Σ xᵢ` (jitter only) | **128‑bit** | Used only by the general standard deviation algorithm for total block‑time jitter. |
+| Sum of squares `S2 = Σ (xᵢ)²` (jitter only) | **256‑bit** | Used only by the general standard deviation algorithm for total block‑time jitter. |
+| Advance‑regularity variance numerator `V` | **256‑bit** | `V = n_a · n_b · (a − b)²`. Closed form only; no `S`/`S2`. |
+| Advance‑regularity denominator `D` | **256‑bit** | `D = n²`. Closed form only. |
+| General variance numerator `V` (jitter) | **256‑bit** | `V = n·S2 − S²`. General algorithm only. |
+| `D = n²` (general algorithm) | **256‑bit** | Under the Fixed Safe Profile with `DELTA`, the jitter sample count `n` can reach `2^55`, so `D = n² < 2^110`. 256‑bit is more than sufficient. |
 | `var_floor = V // D` | **256‑bit numerator** | Floor division of 256‑bit by 256‑bit. |
 | `q = isqrt_floor(var_floor)` | **256‑bit input** | `var_floor` may be up to 2²⁵⁶; `isqrt_floor` returns up to 2¹²⁸. |
 | `midpoint_x4 = D × (4q² + 4q + 1)` | **256‑bit** | Under caps, product fits in 256‑bit. |
@@ -95,22 +99,38 @@ Product bound:
 
 This is far below `2¹²⁸` (≈ 3.4 × 10³⁸). **128‑bit arithmetic is entirely safe** for the numerator.
 
-## Why 256‑bit for sum of squares (`S2`) and variance numerator (`V`)
+## Why 256‑bit for sum of squares (`S2`) and variance numerator (`V`) — jitter path
 
-The per‑cycle advance values, scaled by 100, can be extremely large under the Fixed Safe Profile. We derive a safe upper bound as follows:
+This section applies only to **total block‑time jitter**, which uses the general sample‑by‑sample algorithm. Advance regularity does not use `S2`; it uses the mandatory closed form, whose `V` and `D` are proven in Appendix G to fit in 256 bits.
 
-- `d_hi_cont = floor(T / quantum) + 1`, with `T` up to `10¹⁷` (for `time_unit=12`, `freq_candidate=1`) and `quantum` as small as `1`, so `d_hi_cont` can reach `10¹⁷ + 1`.
-- `adv_hi_cont = floor((d_hi_cont × mult_num) / mult_den)`. With `mult_num = mult_den = 2²⁰`, the worst case occurs when `mult_den = 1`, giving `adv_hi_cont = d_hi_cont × mult_num ≈ (10¹⁷) × (2²⁰)` ≈ `1.05 × 10²³`.
-- Scaling by 100 for the advance regularity calculation yields values up to `1.05 × 10²⁵`.
-- Squaring such a value gives approximately `1.1 × 10⁵⁰`, which **far exceeds `2¹²⁸`** (≈ 3.4 × 10³⁸).
-- Even a single sample would exceed 128‑bit storage for `S2`; with multiple jitter points the sum grows further.
+For jitter, the required 256‑bit width is proven in **Appendix G**, which bounds:
 
-Therefore **256‑bit is mandatory** for `S2` and `V`.
+```text
+S2_total < 2^186
+```
+
+under the Fixed Safe Profile caps. Consequently:
+
+```text
+V = n·S2 − S²
+  < n·S2
+  < 2^55 × 2^186
+  = 2^241
+```
+
+Both `S2` and `V` fit comfortably in 256 bits.
 
 ## Why 256‑bit is required for the standard deviation division and square root
 
-- `V` is a 256‑bit quantity. Dividing by `n²` (which can be up to 2⁶² if `N` is 2³¹−1) still requires 256‑bit division.
-- The resulting `var_floor` may be up to 2²⁵⁶ (if `n=1`), but under Fixed Safe Profile and jitter window size ≤ 21, `var_floor` will be far smaller. Nevertheless, the algorithm specifies 256‑bit inputs for `isqrt_floor`, so the function must support 256‑bit inputs.
+After `V` and `D` are obtained — either from the general algorithm for jitter or from the closed form for advance regularity — the exact rational standard deviation step uses:
+
+- `V` is a 256‑bit quantity.
+- `D = n²` can be up to `2^110` (jitter) or `2^110` (advance regularity under the corrected bound).
+- `var_floor = V // D` requires 256‑bit division.
+- `q = isqrt_floor(var_floor)` requires a 256‑bit input.
+- `midpoint_x4` and `V_x4` are 256‑bit intermediates.
+
+Therefore the final steps are identical for both metrics and require 256‑bit arithmetic.
 
 ## Additional requirements for sparse‑map and long‑term accumulators
 
@@ -134,7 +154,7 @@ Saturation happens *after* the exact computation. You must compute the value in 
 GUNZ 5.0.0 does not compute a single combined score. There is no need for a 128‑bit score sum. Each metric (`block_time_inaccuracy`, `jitter`, `advance_regularity`) is stored and saturated independently.
 
 **4. When 256‑bit is truly mandatory.**  
-The standard deviation accumulators `S2`, `V`, `D`, `var_floor`, `midpoint_x4`, and `V_x4` require 256‑bit. Most other operations fit in 128‑bit or less.
+The jitter general algorithm and the advance‑regularity closed form both require 256‑bit accumulators for `V`, `D`, `var_floor`, `midpoint_x4`, and `V_x4`. The jitter general algorithm additionally requires 128‑bit `S`. Most other operations fit in 128‑bit or less.
 
 **5. Signed vs. unsigned.**  
 Almost all arithmetic is unsigned. The main exception is the sparse‑map accumulator, which is **signed** because gaps can accumulate and be stored as `freq_delta_start` (`s16`). Using an unsigned accumulator there would break the overflow‑detection logic.
@@ -150,8 +170,9 @@ Almost all arithmetic is unsigned. The main exception is the sparse‑map accumu
 - [ ] `total_time` and subtraction → 128‑bit
 - [ ] Long‑term `block_time_inaccuracy` exact rational mean → 256‑bit
 - [ ] `advance_regularity_btu` numerator → 128‑bit
-- [ ] Standard deviation `S` → 128‑bit
+- [ ] Standard deviation `S` → 128‑bit (jitter only)
 - [ ] Standard deviation `S2`, `V`, `D`, `var_floor`, `midpoint_x4`, `V_x4` → 256‑bit (unless relaxation proven)
+- [ ] Advance‑regularity `V` and `D` → 256‑bit closed form (no `S`/`S2`)
 - [ ] `isqrt_floor` input → 256‑bit (output ≤ 128‑bit)
 - [ ] Sparse‑map accumulator → 128‑bit signed
 - [ ] Long‑term cumulative block time → 128‑bit unsigned
@@ -173,6 +194,7 @@ Almost all arithmetic is unsigned. The main exception is the sparse‑map accumu
 | `T` (time_unit=12, freq=1) | 10¹⁷ | base time units |
 | `effective_step` | 2³²−1 | 10⁻⁵ Hz |
 | `hold_cycles + sep_cycles` | 510 | sum of two `u8` |
+| `n` (jitter sample count) | `< 2^55` | worst case under `DELTA` and 511 jitter points |
 
 ---
 
