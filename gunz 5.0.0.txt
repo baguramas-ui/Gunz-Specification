@@ -15,7 +15,7 @@ Co-authored by DeepSeek and Corentin Amice.
 
 ---
 
-# GUNZ 5.0.0C — Graduated Underlying Navigation Zones -
+# GUNZ 5.0.0E — Graduated Underlying Navigation Zones -
 **ISA · Runtime · Library**
 
 ---
@@ -186,7 +186,7 @@ The notation box is expanded with the following quick-reference tables:
 
 ## 5. GUNZ‑NET (Future)
 
-- Placeholder only. Not part of core 5.0.0A.
+- Placeholder only.
 
 ---
 
@@ -525,7 +525,7 @@ A conformant GUNZ implementation that targets the Minimal Profile **SHALL** impl
 
 - **Static opcode subset** – Implement `HALT`, `ZONE`, `SKIP_ZONE`, `SCAN_RES`, and `EXPORT`. All other opcodes (including `LOOP`, `IMPORT`, `STREAM`, `PURE_CALL`) **SHALL** be rejected with `GUNZ_MALFORMED_BYTECODE`.
 
-- **Resonance Evaluator** (§3.11) – Implement Phase 1 dense scan and Phase 2 stability width. Use integer arithmetic in the base time unit, half‑to‑even rounding (§4.5.1), and the deterministic standard deviation algorithm (§4.5.3). Enforce the plan's declared `max_scan_iterations` and `total_max_scan_iterations` (§3.4.1), failing with `GUNZ_ITERATION_LIMIT_EXCEEDED` if exceeded.
+- **Resonance Evaluator** (§3.11) – Implement Phase 1 dense scan and Phase 2 stability width. Use integer arithmetic in the base time unit, half‑to‑even rounding (§4.5.1), and the deterministic standard deviation algorithm (§4.5.3). Enforce `max_scan_iterations` by evaluating at most that many candidates per zone and representing the remaining zone span as type-0 long-jump entries. Per-zone truncation alone SHALL NOT cause `GUNZ_ITERATION_LIMIT_EXCEEDED`. Enforce the plan's declared `total_max_scan_iterations` (§3.4.1), failing with `GUNZ_ITERATION_LIMIT_EXCEEDED` if the global iteration pre-pass excludes one or more zones, or if deferred companion budget is exceeded.
 
 - **Map output** (§4.2, §4.2.1) – Produce 16‑byte map entries with canonical ordering, run‑length consolidation, and the long‑jump sentinel. Compute the canonical map data `xxh3_64` checksum over the **64‑byte header** and entries. Write a valid map header with `map_version = 0x0062`.
 
@@ -546,6 +546,7 @@ The Minimal Profile does **not** require:
 - UUID‑v4 validation for `session_id` (any string or `null` is acceptable).
 - Attestation signatures (`attestation_signature` may be omitted).
 - Compressed statistics (`.gunzstatz`) in the normative LEB128 format (any lossless compression may be used, or none at all).
+- A Minimal‑profile implementation that does not support long‑term scan SHALL reject any bytecode program or native plan requesting `long_term_scan` with `GUNZ_INVALID_LIBRARY`. It SHALL NOT silently ignore the request.
 
 An implementation satisfying the Minimal Profile is fully conformant for all GUNZ programs that do not use dynamic opcodes, callbacks, or network features. Implementors **MAY** optionally support higher conformance tiers (dynamic lane, sandboxing, etc.) by following the normative sections of this specification.
 
@@ -624,7 +625,7 @@ The evaluator's hot path operates on native‑aligned structures constructed at 
 | 0‑4   | (reserved)                   | Must be 0 |
 | 5     | `long_term_scan`             | When set, the scanner shall evaluate multiple consecutive blocks for each candidate, accumulating statistics over the configured measurement window (see §3.11 and §4.9). |
 | 6     | (reserved)                   | Must be 0 |
-| 7     | `sandboxed_callbacks_required` | When set, any `PURE_CALL` in the program must be executed in a sandboxed environment that physically prevents side effects (§3.7). If the runtime cannot provide such sandboxing, the program shall be rejected with `GUNZ_INVALID_LIBRARY`. If set, and at least one `PURE_CALL` is actually invoked, the runtime **must** produce an Ed25519 attestation signature (see §4.10). If set but no `PURE_CALL` is invoked, no attestation is required, and the canonical-map rules for no-callback scans of §4.6 apply. Minimal-profile implementations SHALL either reject any program with `sandboxed_callbacks_required` set, or accept the program but still reject every `PURE_CALL` opcode as required by §1.2. Full-profile implementations SHALL enforce the flag as specified in §3.7. |
+| 7     | `sandboxed_callbacks_required` | When set, any `PURE_CALL` in the program must be executed in a sandboxed environment that physically prevents side effects (§3.7). If the runtime cannot provide such sandboxing, the program shall be rejected with `GUNZ_INVALID_LIBRARY`. If set, and at least one callback (`PURE_CALL` or `STREAM`) is actually invoked, the runtime must produce an Ed25519 attestation signature (see §4.10). If set but no callback is invoked, no attestation is required, and the canonical-map rules for no-callback scans of §4.6 apply. Minimal-profile implementations SHALL either reject any program with `sandboxed_callbacks_required` set, or accept the program but still reject every `PURE_CALL` opcode as required by §1.2. Full-profile implementations SHALL enforce the flag as specified in §3.7. |
 | 8‑9   | (reserved)                   | Must be 0. These bits are reserved and have no capability meaning. |
 | 10    | `sparse_map`                 | When set, the map generator shall merge any omitted intervals' run lengths into the next emitted entry's `freq_delta_start`, preserving spatial correctness. A scanner that does not support sparse maps shall reject a program with bit 10 set, returning `GUNZ_INVALID_LIBRARY`. This flag is evaluated independently of other capability flags. <br> This bytecode flag is a scan request. It is distinct from the `sparse_map` bit in the map header `map_flags`, which records the resulting map property. |
 | 11    | `streaming`                  | Enable streaming map output |
@@ -839,7 +840,7 @@ The effective step size is recorded in the map header's `effective_step` field (
 **2.3.3.11 `EXPORT_ORACLE`**  
 The `EXPORT_ORACLE` opcode writes the CQR data from the object table entry identified by `object_id` to a `.gunzoracle` file.  The second operand `reserved` must be `0x00000000`; a non‑zero value shall cause the bytecode to be rejected with `GUNZ_MALFORMED_BYTECODE`.  If the object does not contain a valid CQR, the operation fails with `GUNZ_INVALID_OBJECT`.
 
-Implementations that do not support the GUNZ‑ORACLE companion shall reject opcodes `0x0D` and `0x0E` with `GUNZ_MALFORMED_BYTECODE`.  For any implementation that supports `ORACLE`, the `flags` operand of the `ORACLE` instruction **must** be `0`; a non‑zero value shall cause the bytecode to be rejected with `GUNZ_MALFORMED_BYTECODE`.
+Implementations that do not support the GUNZ‑ORACLE companion shall reject opcodes `0x0D` and `0x0E` with `GUNZ_MALFORMED_BYTECODE`.  Reserved bytes 2–3 of the `ORACLE` instruction SHALL be zero; a non‑zero value shall cause the bytecode to be rejected with `GUNZ_MALFORMED_BYTECODE`.
 
 The `EXPORT_ORACLE` instruction is exactly 9 bytes.
 
@@ -924,9 +925,12 @@ void          SparseMapBuilder_Release(SparseMapBuilder *builder);
 An `ExecutionPlan` contains no runtime feature‑selection branches; all invariant properties are resolved at construction time. The hot loop contains only data‑dependent operations.
 
 `SparseMapBuilder_Release` frees all internal resources held by the builder, including any persistent buffers allocated for map‑entry storage.  The caller shall invoke `SparseMapBuilder_Release` when the builder is no longer needed; after this call, the builder handle is invalid.  
+
 `SparseMapBuilder_Release` does not affect the `ScratchArena` passed to `ExecutionPlan_Run`; it releases only the builder's internally held persistent resources.  The `ScratchArena` remains the caller's responsibility.
 
 *(Informative)*  The `SparseMapBuilder` handle passed to `ExecutionPlan_Run` is created by the caller through an implementation‑defined mechanism.  A typical C API would provide a function such as `SparseMapBuilder_Create()` that allocates and returns an empty builder; the caller then passes this handle to `ExecutionPlan_Run` and later releases it with `SparseMapBuilder_Release`.  The exact name and signature are left to the implementation.
+
+Plan construction input SHALL distinguish “`reference_block_time` not provided” from “explicit zero”. A native `ExecutionPlan` configuration SHALL use an explicit presence flag or a non‑zero `reference_source` discriminator.
 
 **`ZoneBatch`** is an opaque container of zero or more zones to be evaluated. Each zone is a triple `(freq_low, freq_high, evaluator_id)`. The plan must document the mapping from `evaluator_id` to the specific evaluator implementation. Zones in a batch may be evaluated in any order; the final output must be identical regardless of order. Implementations must provide a way to populate a `ZoneBatch` from the bytecode's `ZONE` and `SKIP_ZONE` instructions; the exact mechanism is implementation‑defined but must preserve determinism. A `SKIP_ZONE` adds the zone boundaries to the batch with a special marker; no evaluator is invoked for these zones.
 
@@ -1293,21 +1297,38 @@ Sparse‑map omission SHALL be applied only **after** per‑thread map merging a
 Positive `freq_delta_start` values are produced only by the §4.2 sparse‑emission algorithm, which runs after the pre‑sparse merge and gap‑detection phase. Therefore they do not exist on evaluated normal intervals during merge and gap detection. If such a positive delta is encountered in this earlier phase, the stream is malformed and SHALL be rejected with `GUNZ_MALFORMED_BYTECODE`; it SHALL NOT be treated as a sparse‑omitted interval at this stage.
 
 **Run‑length overflow:** 
-The `run_length` field in a map entry is a `u16` (0–65535). When consolidating consecutive identical candidates, if adding another candidate would cause `run_length` to exceed 65535, the `SparseMapBuilder` shall finalize the current entry and begin a new entry for the remaining consecutive candidates, repeating as necessary until the entire interval is covered. The split must preserve all metric fields (including flags) for each split piece. **When splitting an entry due to run‑length overflow, the subsequent entry SHALL have `freq_delta_start = 0`. Because the decoder’s current frequency is exactly the next candidate after the preceding chunk, this makes the chunks physically contiguous. No long‑jump is required, regardless of `effective_step`.**
+The `run_length` field in a map entry is a `u16` (0–65535). When consolidating consecutive identical candidates, if adding another candidate would cause `run_length` to exceed 65535, the `SparseMapBuilder` shall finalize the current entry and begin a new entry for the remaining consecutive candidates, repeating as necessary until the entire interval is covered. The split must preserve all metric fields (including flags) for each split piece. 
+
+**When splitting an entry due to run‑length overflow, the subsequent entry SHALL have `freq_delta_start = 0`. Because the decoder’s current frequency is exactly the next candidate after the preceding chunk, this makes the chunks physically contiguous. No long‑jump is required, regardless of `effective_step`.**
 
 ### 3.4 Static Lane Execution
 
 #### 3.4.1 Plan Construction
 
 - Full constant propagation, direct callback binding (no runtime `callback_id` lookup), and resolution of all feature flags into specialised evaluator blocks. The resulting hot loop contains no opcode decoding, no branch dispatch, and no feature‑test branches.
-- Zones are grouped by identical evaluator configuration, producing a schedule of `EvaluatorBlock` structures. Each block holds a function pointer, embedded constants, zone span, and scratch offsets. If an explicit delta pair is active for a zone, the evaluator block carries the `(d_lo, d_hi)` override values and a boolean flag indicating the override is active; otherwise those fields are zeroed and the evaluator computes `d_lo`/`d_hi` from the cycle time.
-- **Compile‑time binding of DELTA state:** A purely static‑lane bytecode program cannot contain `DELTA`, because `DELTA` is a Dynamic Lane opcode. However, the static‑lane evaluator may still receive an explicit delta override through a native `ExecutionPlan` configuration, or from zones captured after a Dynamic Lane `DELTA` instruction. When an explicit delta override is active, the `(d_lo, d_hi)` override is captured and embedded immutably into each `EvaluatorBlock`. This guarantees that `ZoneBatch` entries remain stateless with respect to `DELTA`; worker threads evaluating zones in any order see a consistent snapshot of the override state.
+
+- Zones are grouped by identical evaluator configuration, producing a schedule of `EvaluatorBlock` structures. Each block holds a function pointer, embedded constants, zone span, and scratch offsets.
+
+ If an explicit delta pair is active for a zone, the evaluator block carries the `(d_lo, d_hi)` override values and a boolean flag indicating the override is active; otherwise those fields are zeroed and the evaluator computes `d_lo`/`d_hi` from the cycle time.
+
+- **Compile‑time binding of DELTA state:**
+ A purely static‑lane bytecode program cannot contain `DELTA`, because `DELTA` is a Dynamic Lane opcode. However, the static‑lane evaluator may still receive an explicit delta override through a native `ExecutionPlan` configuration, or from zones captured after a Dynamic Lane `DELTA` instruction. When an explicit delta override is active, the `(d_lo, d_hi)` override is captured and embedded immutably into each `EvaluatorBlock`. 
+
+This guarantees that `ZoneBatch` entries remain stateless with respect to `DELTA`; worker threads evaluating zones in any order see a consistent snapshot of the override state.
+
 - If an explicit delta override is supplied through a native `ExecutionPlan` configuration and `d_lo > d_hi`, plan construction SHALL fail with `GUNZ_INVALID_LIBRARY`.
+
 - When an explicit delta override is active, the override values `d_lo_ov` and `d_hi_ov` are invariant and SHALL be embedded immutably in the evaluator block. The continuous deltas `d_lo_cont` and `d_hi_cont` still vary per candidate because they depend on the cycle time `T`, even when an override is active.
+
   For general zones, no precomputed `N_max` based on continuous advances is assumed. An implementation MAY use such a precomputation as an internal optimization only if it proves that the resulting candidate classifications are bit‑identical to the normative per‑candidate computation.
   The N‑search remains bounded solely by `MAX_N = 2³¹ − 1`.
+
 - Zone data is stored contiguously; the layout is implementation‑defined but must support efficient vectorisation.
-- **Plan complexity iteration bounds:** During construction, the plan's total number of evaluator blocks, worst‑case scan iterations per zone, and worst‑case evaluation iterations per candidate are computed. The plan must be capable of carrying a declared `max_scan_iterations` (per zone) of at least 2²⁴ (16 777 216). Implementations may support higher values; they must never accept a plan whose declared limit is lower than this minimum. A `max_eval_iterations` (per candidate, non‑long‑term) of at least 65 536 is also required, along with a `total_max_scan_iterations` (global) of at least 2²⁶ (67 108 864). If the user does not supply a higher value, the runtime **SHALL** initialise `max_scan_iterations` to 2²⁴.  
+
+- **Plan complexity iteration bounds:**
+ During construction, the plan's total number of evaluator blocks, worst‑case scan iterations per zone, and worst‑case evaluation iterations per candidate are computed. The plan must be capable of carrying a declared `max_scan_iterations` (per zone) of at least 2²⁴ (16 777 216). Implementations may support higher values; they must never accept a plan whose declared limit is lower than this minimum. A `max_eval_iterations` (per candidate, non‑long‑term) of at least 65 536 is also required, along with a `total_max_scan_iterations` (global) of at least 2²⁶ (67 108 864). If the user does not supply a higher value, the runtime **SHALL** initialise `max_scan_iterations` to 2²⁴.  
+
+The total number of successfully evaluated candidates represented in a single `.gunzmap` SHALL NOT exceed `UINT32_MAX`. Plan construction SHALL enforce that `total_max_scan_iterations ≤ UINT32_MAX`. Statistics files `.gunzstats` and `.gunzstatz` SHALL NOT be emitted for a scan whose evaluated candidate record count would exceed `UINT32_MAX`; such a scan must be split or rejected.
 
 For `long_term_scan` plans, the per‑candidate evaluation limit is **derived by the plan constructor** and SHALL NOT be taken from a user‑supplied value.
 Plan construction SHALL ensure `quantum ≥ 1` before computing this limit; if not, construction fails as specified in §3.10.
@@ -1323,7 +1344,9 @@ The constructor SHALL set:
 
 Any user‑supplied `max_eval_iterations` is ignored for long‑term scans.
 
-This limit is intentionally conservative. For every valid long‑term candidate, the raw block time is a positive integer multiple of `quantum`; therefore `ceil(window_duration / quantum)` is an upper bound on the number of raw blocks needed to reach `window_duration`.
+This limit is intentionally conservative. For every valid long‑term candidate, the raw block time is a positive integer multiple of `quantum`; therefore `ceil(window_duration / quantum)` is an upper bound on the number of raw blocks needed to reach `window_duration`. 
+
+For plans constructed from bytecode (Static Lane or Dynamic Lane), long‑term `max_eval_iterations` SHALL NOT exceed `2³²`. Native `ExecutionPlan` configurations MAY exceed this limit only if the operator explicitly acknowledges the extended temporal depth. The acknowledgement mechanism SHALL be a documented plan‑construction parameter with a defined default of `false`.
  
   If the bytecode header sets the `long_term_scan` flag but no `window_duration` is supplied at plan‑construction time, plan construction SHALL fail with `GUNZ_INVALID_LIBRARY`.  
   
@@ -1331,7 +1354,9 @@ This limit is intentionally conservative. For every valid long‑term candidate,
  
   If the user does not supply a higher value, the runtime SHALL initialise `max_eval_iterations` to 65 536 for non‑long‑term scans and `total_max_scan_iterations` to 2²⁶ (67 108 864). 
 
-For long‑term scans, the constructor‑derived `max_eval_iterations` takes precedence over the default 65 536. In non‑long‑term scans `max_eval_iterations` does **not** govern the N‑search. The N‑search is bounded solely by `MAX_N`. The `max_eval_iterations` parameter remains required to be at least 65 536 for plan‑complexity accounting, but it is not used as an inner‑loop bound for N‑search. It remains normative for long‑term scans, where it bounds temporal block repetition per candidate. Global budget enforcement is performed exclusively by the single‑threaded pre‑pass described in §3.11 “Global iteration limit enforcement.” Plan construction SHALL NOT fail solely because the sum of zone candidate counts exceeds `total_max_scan_iterations`. The pre‑pass will deterministically exclude zones as necessary and return `GUNZ_ITERATION_LIMIT_EXCEEDED` after producing a partial map.  
+For long‑term scans, the constructor‑derived `max_eval_iterations` takes precedence over the default 65 536. In non‑long‑term scans `max_eval_iterations` does **not** govern the N‑search. The N‑search is bounded solely by `MAX_N`. The `max_eval_iterations` parameter remains required to be at least 65 536 for plan‑complexity accounting, but it is not used as an inner‑loop bound for N‑search. It remains normative for long‑term scans, where it bounds temporal block repetition per candidate.
+
+ Global budget enforcement is performed exclusively by the single‑threaded pre‑pass described in §3.11 “Global iteration limit enforcement.” Plan construction SHALL NOT fail solely because the sum of zone candidate counts exceeds `total_max_scan_iterations`. The pre‑pass will deterministically exclude zones as necessary and return `GUNZ_ITERATION_LIMIT_EXCEEDED` after producing a partial map.  
  
   If the total number of evaluator blocks exceeds an implementation‑defined threshold (at least 65,536), construction fails with `GUNZ_ARENA_EXHAUSTED`, as an implementation‑defined resource/complexity limit. These protections prevent denial‑of‑service via small bytecode programs that expand to enormous evaluator workloads.
 
@@ -1401,7 +1426,7 @@ A pending `PURE_CALL` that is consumed by a `SKIP_ZONE` is silently discarded du
 
 *(Informative)* When a `LOOP` body contains a `PURE_CALL` followed by a `ZONE`, each loop iteration creates a separate `ZONE` instance with its own captured callback. The “only last retained” rule applies only to consecutive `PURE_CALL` instructions without an intervening `ZONE`.
 
-In a static‑lane program, a `SCAN_RES` instruction that appears after the first `ZONE` or `SKIP_ZONE` in the bytecode is malformed; the plan constructor shall reject the program with `GUNZ_MALFORMED_BYTECODE`.
+In a static‑lane program, a `SCAN_RES` instruction that appears after the first `ZONE` or `SKIP_ZONE` in the **effective inline instruction sequence** is malformed; the plan constructor shall reject the program with `GUNZ_MALFORMED_BYTECODE`.
 
 **Plan complexity threshold:** Implementations **SHALL** support at least 65,536 evaluator blocks; they may support more, but must document the exact limit. This minimum ensures that a conformant implementation can handle all standard scan configurations without exhaustion.  
 This implementation‑defined evaluator‑block limit is denoted `MAX_STATIC_EVALUATORS` in Appendix A.
@@ -1553,7 +1578,11 @@ Every plan that uses the Dynamic Lane **SHALL** embed the exact fuel table shown
 *(Informative)* The “Cost Class” column is an implementation‑guidance grouping only. It has no normative meaning; the canonical fuel values in the third column are the sole normative requirement.
 
 **Fuel consumption semantics:**  
+
+Instruction framing and fixed operand length validation required to determine opcode length SHALL be performed before the fuel check. If decoding the instruction would read beyond the bytecode buffer or violates fixed operand length constraints, the VM SHALL return `GUNZ_MALFORMED_BYTECODE` even if insufficient fuel remains.
+
 For all opcodes **except `HALT`**, the VM performs the pre‑execution fuel check: before each instruction is executed, the VM checks whether `fuel < instruction_cost`. If so, the VM halts with `GUNZ_FUEL_EXHAUSTED` and **the instruction is not executed**. Otherwise, the instruction is fully executed, and *after* execution, `fuel` is decremented by the instruction's cost.
+
 
 **HALT fuel semantics:** HALT always executes. If `fuel > 0`, it is decremented by 1 after execution. If `fuel == 0`, it executes without decrementing. The `fuel_consumed` field in `.gunzmeta` shall reflect the actual decrement.
 
@@ -1653,7 +1682,7 @@ If multiple `PURE_CALL` instructions are issued before a `ZONE`, only the most r
 
 A pending `PURE_CALL` consumed by a `SKIP_ZONE` is silently discarded during evaluation. Such a pending callback SHALL NOT be resolved at  plan‑construction time, and a missing `callback_id` in the active library SHALL NOT cause plan construction to fail for that `SKIP_ZONE`.
 
-If a pending `PURE_CALL` is preserved across `LIBREF` and the newly active library does not define the captured `callback_id`, plan construction SHALL fail with `GUNZ_INVALID_LIBRARY`.
+A pending `PURE_CALL` preserved across `LIBREF` SHALL be resolved only if it is later consumed by a `ZONE`. If it is consumed by a `SKIP_ZONE`, it is discarded without resolution, and absence of the callback in the active library SHALL NOT cause plan construction failure.
 
 **ORACLE and EXPORT_ORACLE in the Dynamic Lane:**  
 When the VM encounters an `ORACLE` instruction, it captures a snapshot of the current system state (multiplier, rounding mode, delta override, `effective_step`, and any pending `PURE_CALL` specification) and the instruction operands, including `object_id`.  The instruction is appended to a deferred‑operation queue.  Fuel for the instruction (100) is deducted at capture time.  
@@ -1677,7 +1706,9 @@ When the VM encounters `EXPORT`, `IMPORT`, or `STREAM`, the instruction is **not
 
 - If a `STREAM` appears multiple times, only the most recently captured `callback_id` (in program order) is active.
 
-- If a deferred operation references an `object_id` that has not been populated, the runtime shall fail with `GUNZ_INVALID_OBJECT`.
+During phase 3 deferred processing, `EXPORT`, `IMPORT`, and `STREAM` operations SHALL be processed in capture order. A `STREAM` operation changes the active streaming callback only for later `EXPORT` operations in that phase. It SHALL NOT affect `EXPORT` operations captured earlier and already processed.
+
+- If a deferred operation reads from an `object_id` that has not been populated, the runtime SHALL fail with `GUNZ_INVALID_OBJECT`. Operations that create or replace an object, such as `EXPORT`, `IMPORT`, or `ORACLE` result storage, SHALL first validate or construct the new object and then atomically install it as specified in §3.9.
 
 - If any deferred operation fails, the runtime shall abort the queue immediately, discard any remaining pending operations, and return the failure code to the caller. The fuel cost for each deferred opcode is deducted at the time the instruction is encountered, not when the operation is performed.
 
@@ -1834,6 +1865,8 @@ The runtime maintains an immutable mapping from `library_id` (u16) to `LibraryPr
 
 - If the library profile does not specify `jitter_window_radius`, or specifies `jitter_window_radius = 0`, the default radius **10000** (21 points, ±0.1 Hz) is used. The stored value is the scale factor; the actual radius = `jitter_window_radius × 1000`.
 
+- Native plan construction inputs SHALL encode `jitter_window_radius` using the same u8 scale‑factor domain as library profiles and map headers.
+
 - Other header fields have no library‑supplied defaults.
 
 **Library profile validation:**  
@@ -1841,7 +1874,7 @@ A library profile must itself satisfy `quantum ≥ 1`, `mult_num ≠ 0`, and `mu
 
 After merging, `quantum` must be ≥ 1 and both `mult_num` and `mult_den` must be non‑zero. If any of these conditions fails (e.g., because the bytecode and the library both specified zero), plan construction fails with `GUNZ_INVALID_LIBRARY`.
 
-`library_id = 0` is reserved for "no library"; the header must supply all parameters and no substitution occurs. When `library_id = 0`, the program may omit any `LIBREF` instruction; the absence of a library is not an error. A missing library entry causes plan construction to fail with `GUNZ_INVALID_LIBRARY`.
+`library_id = 0` is reserved for "no library"; the header must supply all parameters and no substitution occurs. When `library_id = 0`, the program may omit any `LIBREF` instruction; the absence of a library is not an error. A missing non‑zero library entry causes plan construction to fail with `GUNZ_INVALID_LIBRARY`.
 
 The `callback_abi_version` in each library profile applies to all callbacks **in that library**. Any resolved callback whose ABI version does not match its own library’s declared version causes plan construction to fail with `GUNZ_INVALID_LIBRARY`.
 
@@ -1860,6 +1893,8 @@ The resonance evaluator computes the metrics (`block_time_inaccuracy`, `jitter`,
 - It is the total duration of one complete cycle of the target process, measured from the start of the first tick to the end of the final tick (including any hold or separation cycles).
 
 - It is the quantity the scanner compares against `reference_block_time` to determine how closely a given frequency aligns with the desired timing. 
+
+In formulas, `block_time` denotes the raw per‑cycle advance sum before hold/sep contribution. `total_time` denotes `block_time + (hold_cycles + sep_cycles) × T`. The map field `block_time_inaccuracy` is a legacy name; it measures the absolute deviation of `total_time` from `reference_block_time`.
 
 - It must be present in every plan. If the user or AI agent does not supply it explicitly at plan‑construction time, the runtime **shall** apply the deterministic guessing rule (Rule GUNZ_REF_GUESS) to compute a seed value.  
   
@@ -1922,9 +1957,12 @@ requires `reference_block_time > 0`.
 
   *(Normative)* After applying the override, the resulting `block_time` is guaranteed to be an integer multiple of `quantum` by construction (the formula multiplies an integer sum by `quantum`).
 
-- If `long_term_scan` is active, a **measurement window duration** `window_duration` (a `u64` in the **same base time unit as the header**) is supplied at plan construction and embedded in the evaluator block. The normative maximum `window_duration` is **`2⁶⁴ − 1`** base‑time units. 
+- If `long_term_scan` is active, a **measurement window duration** `window_duration` (a `u64` in the **same base time unit as the header**) is supplied at plan construction and embedded in the evaluator block. The serialised field maximum for `window_duration` is `2⁶⁴−1` base‑time units. A Fixed Safe Profile implementation without an extended‑range proof SHALL additionally enforce the §3.4.1 cap of `2⁴⁵`. 
+Extended‑range compliant implementations may accept values above `2⁴⁵` and up to `2⁶⁴−1` only if they satisfy the formal overflow‑safety proof requirements of §3.4.1.
  
-  *Rationale:*  The evaluator already uses 128‑bit accumulators for all temporal sums (§3.4.2, §3.11 step 3), and the per‑candidate `max_eval_iterations` limit prevents unbounded simulation.  The previous 32‑bit cap was a conservative safety measure; raising it to 64 bits allows multi‑hour observation windows at nanosecond precision without sacrificing determinism or safety.  Implementations that support `long_term_scan` must ensure that the per‑candidate iteration limit (`max_eval_iterations`) is set appropriately for the chosen window.  
+  *Rationale:*
+ The evaluator already uses 128‑bit accumulators for all temporal sums (§3.4.2, §3.11 step 3), and the per‑candidate `max_eval_iterations` limit prevents unbounded simulation.  The previous 32‑bit cap was a conservative safety measure; raising it to 64 bits allows multi‑hour observation windows at nanosecond precision without sacrificing determinism or safety.  Implementations that support `long_term_scan` must ensure that the per‑candidate iteration limit (`max_eval_iterations`) is set appropriately for the chosen window.  
+
   The `window_duration` value as a `u64` integer must not exceed `2⁶⁴−1`; no additional scaling is applied. Plan construction **SHALL** reject a request where `window_duration > 2⁶⁴−1` and return `GUNZ_INVALID_LIBRARY`.
 
 - `jitter_window_radius` – the effective radius, in 10⁻⁵ Hz units, for the jitter‑point window. This value is resolved at plan construction time per §3.10: if the library profile specifies a non‑zero `jitter_window_radius`, the effective radius is `stored_value × 1000`; otherwise the default **10000** (21 points, ±0.1 Hz) is used. The resolved radius is always a multiple of 1000.
@@ -2056,12 +2094,16 @@ The per‑point values remain full‑precision throughout the aggregation; only 
    - **Computing `N`:** 
      A conformant implementation **SHALL** determine `N` by the following method:  
      Start from the closed‑form estimate `N₀ = ceil(target_ticks / max(adv_lo_cont, adv_hi_cont, 1))`.  
+    
      If `N₀ > MAX_N`, mark candidate saturated with all metric fields set to their saturated sentinel values, set `FLAG_AVOID`, set `FLAG_INVALID`, and set `stability_width = 0`; do not enter the search loop. Increment `N` monotonically (by 1) from `N₀`.  At each `N`, compute `N_hi` via the rounding procedure below. 
      If `N_hi` is within `[0, N]` **and** the actual total tick advance `(N − N_hi) × adv_lo_cont + N_hi × adv_hi_cont` reaches or exceeds `target_ticks`, accept this `N` and stop.  
      If `N_hi` is outside `[0, N]` or the advance is insufficient, continue to the next `N`.  
+
      The search must proceed up to `MAX_N = 2³¹ − 1`.  If no `N` satisfying both conditions is found, mark the candidate with saturated sentinels, set `FLAG_AVOID`, set `FLAG_INVALID` and set `stability_width = 0`.  
-     The monotonic N‑search is bounded **only** by `MAX_N = 2³¹ − 1`. The plan’s `max_eval_iterations` SHALL NOT be applied as a bound on the N‑search in non‑long‑term scans.  
-     An implementation MAY use an internal shortcut that provably yields identical candidate classification, including `N`, `N_hi`, validity flags, saturated sentinels, `FLAG_AVOID` status, and `FLAG_INVALID` status, for all inputs. No conformant implementation SHALL reject a candidate solely because the monotonic search required more than `max_eval_iterations` steps.
+
+    The monotonic N‑search is bounded **only** by `MAX_N = 2³¹ − 1`. The plan’s `max_eval_iterations` SHALL NOT be applied as a bound on the N‑search in non‑long‑term scans.  
+
+      A conformant implementation SHALL perform the N‑search in O(log MAX_N) time, or provide a formal proof that its search terminates after at most a fixed implementation‑defined bound independent of `target_ticks`, while producing bit‑identical candidate classification to the normative monotonic search, including `N`, `N_hi`, validity flags, saturated sentinels, `FLAG_AVOID` status, and `FLAG_INVALID` status, for all inputs. No conformant implementation SHALL reject a candidate solely because the monotonic search required more than `max_eval_iterations` steps.
    
    - The computed `N` must be validated by computing the actual total advance using the derived `N_hi`, and must not exceed `MAX_N = 2³¹ − 1`. If the computed `N` exceeds `MAX_N = 2³¹ − 1`, the candidate is marked with saturated sentinels, `FLAG_AVOID` is set, `FLAG_INVALID` is set, and the candidate is skipped. This condition does **not** cause `GUNZ_ITERATION_LIMIT_EXCEEDED`.  The evaluator emits a normal entry with all metric fields set to their saturated sentinel value, `FLAG_INVALID` and `FLAG_AVOID` set.
 
@@ -2076,14 +2118,19 @@ The per‑point values remain full‑precision throughout the aggregation; only 
    - **Block time computation:**  
      If an explicit delta override is **not** active: `block_time = R`.  
      If an override **is** active: `block_time = ((N − N_hi) * d_lo_ov + N_hi * d_hi_ov) * quantum`. **This computation MUST be performed using 128‑bit unsigned arithmetic before the result is stored, to prevent integer overflow.**
+     If an explicit delta override is active and the computed `block_time == 0`, the candidate SHALL be treated as evaluator‑skipped (saturated sentinels, `FLAG_AVOID` set, `FLAG_INVALID` set, `stability_width = 0`) in both long‑term and non‑long‑term modes.
 
    - **Long‑term zero raw block time:**  
      In **long‑term mode only**, after `block_time` has been computed, if `block_time == 0`, the candidate SHALL be treated as evaluator-skipped: saturated sentinels, `FLAG_AVOID` set, `FLAG_INVALID` set, `stability_width = 0`, and no block repetition SHALL be attempted.
 
    - **`total_time` computation:**  
      `total_time = block_time + (hold_cycles + sep_cycles) * T`. **The multiplication `(hold_cycles + sep_cycles) × T` and the subsequent addition shall be performed using 128‑bit unsigned arithmetic.** The absolute difference `|total_time − reference_block_time|` is then computed in 128‑bit arithmetic before being saturated to `UINT32_MAX` and stored in `block_time_inaccuracy`.
+
+             If `long_term_scan == 1` and the constructor‑derived `max_eval_iterations == 0`, every candidate in an evaluated `ZONE` SHALL be treated as evaluator‑skipped before any block simulation is attempted. The emitted entry SHALL carry saturated sentinels, `FLAG_AVOID` set, `FLAG_INVALID` set, `stability_width = 0`, and no `.gunzstats` record. No division by `block_count` SHALL be performed.
    
-- In **long‑term mode**, the evaluator repeats the block simulation until the cumulative block time (excluding hold/sep) reaches or exceeds `window_duration`. For each block `i`, the per‑block total time is computed as
+- In **long‑term mode**, the evaluator repeats the block simulation until the cumulative block time (excluding hold/sep) reaches or exceeds `window_duration`. `window_duration` measures accumulated raw block time excluding hold/sep. Hold and separation cycles do not contribute to the stopping condition. 
+
+ For each block `i`, the per‑block total time is computed as
 
       total_time_i = block_time_i + (hold_cycles + sep_cycles) * T_i
 
@@ -2177,12 +2224,41 @@ This assignment SHALL be performed before final map‑entry consolidation and be
 
 **Three‑Way Metric Model**
 
-GUNZ does not compute a single scalar quality score. Instead, each evaluated candidate carries three independent lower‑is‑better metrics.
+GUNZ does not compute a single scalar quality score. Instead, each evaluated candidate carries three independent lower‑is‑better metrics. For these metrics, the **central total time** is:
 
-For these metrics, the **central total time** is:
+- For non‑long‑term scan: single‑block `total_time` at jitter offset Δ = 0;
+- For long‑term scans, `block_time_inaccuracy` is the absolute deviation of the central total‑time sum divided by its block count — both taken at jitter offset Δ = 0 — from `reference_block_time`, rounded half‑to‑even. It SHALL be computed from the exact rational deviation formula in Step 3:
 
-- non‑long‑term scan: single‑block `total_time` at jitter offset Δ = 0;
-- long‑term scan: `total_time_lt` at jitter offset Δ = 0.
+```text
+sum_total / block_count
+```
+
+and
+
+```text
+reference_block_time
+```
+
+rounded half‑to‑even, where:
+
+- `sum_total` is the sum of `total_time_i` over all blocks at jitter offset Δ = 0,
+- `block_count` is the number of those blocks.
+
+It SHALL be computed as:
+
+```text
+block_time_inaccuracy =
+    min(
+        UINT32_MAX,
+        round_half_even(
+            |sum_total − reference_block_time × block_count|
+            /
+            block_count
+        )
+    )
+```
+
+It SHALL be computed from the exact rational deviation formula in Step 3, not from the saturated map‑entry value.
 
 This is the same central total time used for `FLAG_CENTRAL_ABOVE` and `FLAG_CENTRAL_BELOW`.
 
@@ -2435,6 +2511,8 @@ Therefore `advance_regularity_btu` is expressed in base time units, exactly matc
 
 The division `/` denotes the exact rational quotient; `round_half_even` is the half‑to‑even integer division defined in §4.5.1, where `advance_regularity` is the full‑precision per‑candidate average computed in Step 2, not the saturated `u16` map‑entry field.  
 The result is expressed in base time units and SHALL be used only for the detrimental advance‑regularity threshold comparison.
+
+The numerator and denominator of this conversion SHALL be computed using at least 256‑bit unsigned arithmetic under the Fixed Safe Profile. Extended‑range implementations SHALL use sufficient width to avoid overflow or provide a proof of safety.
 
 **Detrimental mode marking.**
 When `map_type = 1`, an evaluated interval SHALL be marked `FLAG_AVOID` if:
@@ -2967,7 +3045,7 @@ The map header is exactly **64 bytes**. All integers are little‑endian. Reserv
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
-| 0–3 | u32 | `base_freq` | Base frequency, in 10⁻⁵ Hz units. The `base_freq` field SHALL be set to the starting frequency of the first map entry after all per‑thread `SparseMapBuilder`s have been merged in ascending order. This equals the minimum `freq_low` among all zones, including those excluded by the iteration budget, which still produce a long‑jump entry at that frequency. If the program contains at least one `ZONE` or `SKIP_ZONE`, even if every such zone is excluded by the iteration pre‑pass, `base_freq` SHALL be the minimum `freq_low` among those zones. If the program contains no `ZONE` or `SKIP_ZONE` instructions at all, `base_freq` SHALL be `0`. An empty map is a map with no entries. Its `base_freq` SHALL be `0`. |
+| 0–3 | u32 | `base_freq` | Base frequency, in 10⁻⁵ Hz units. `base_freq` SHALL be the initial decoder current frequency for the serialized map. If the program contains at least one `ZONE` or `SKIP_ZONE`, it SHALL equal the minimum `freq_low` among all such zones, including zones excluded by the iteration budget, because excluded zones still produce a long‑jump entry at that frequency. This remains true even if sparse emission omits one or more leading evaluated candidates before the first emitted normal entry. If the program contains no `ZONE` or `SKIP_ZONE` instructions at all, `base_freq` SHALL be `0`. An empty map is a map with no entries. Its `base_freq` SHALL be `0`. |
 | 4–7 | u32 | `reference_block_time` | Ideal block time, expressed in the base time unit. All time values in this header are expressed in the same base time unit as the rest of the map. Must satisfy the consistency rule with `reference_source` below. *(Informative)* A zero `reference_block_time` with `reference_source = 0` means no reference was applicable, not that the ideal block time is zero. It indicates that no evaluated candidate was present to define a reference. |
 | 8–11 | u32 | `quantum` | Clock granularity in base time units. The stored value is the merged effective `quantum`. SHALL be ≥ 1. Decoders SHALL reject a map where `quantum == 0`, returning `GUNZ_MALFORMED_BYTECODE`. |
 | 12–15 | u32 | `target_ticks` | Ticks to reach. SHALL be ≥ 1. Decoders SHALL reject a map where `target_ticks == 0`, returning `GUNZ_MALFORMED_BYTECODE`. |
@@ -2988,7 +3066,7 @@ The map header is exactly **64 bytes**. All integers are little‑endian. Reserv
 | 38 | u8 | `reference_source` | `0` = not applicable, `1` = explicit, `2` = guessed, `3` = calibrated. Values > 3 shall cause decoders to reject with `GUNZ_MALFORMED_BYTECODE`. Writers shall enforce `reference_source ≤ 3`; otherwise map construction fails with `GUNZ_INVALID_LIBRARY`. When explicit `reference_block_time` is supplied, writer shall set `reference_source = 1`. Brief summary: `0` – not applicable, `reference_block_time` defaulted to 0; `1` – explicit; `2` – guessed; `3` – calibrated from previous map. Note: A map with `reference_source = 0` has `reference_block_time = 0`. Such maps may be imported; this version defines no built‑in map‑combination operation. A `reference_source = 0` map is not automatically empty. Consistency rule: `reference_block_time == 0` iff `reference_source == 0`; otherwise decoder SHALL reject with `GUNZ_MALFORMED_BYTECODE`. |
 | 39 | u8 | `long_term_scan` | `0` = single‑block scan, `1` = long‑term aggregated scan. Must be exactly 0 or 1; any other value causes rejection with `GUNZ_MALFORMED_BYTECODE`. This field is the sole authoritative source for long‑term mode. |
 | 40–43 | u32 | `effective_step` | Program‑wide dense‑scan step size, in 10⁻⁵ Hz units. SHALL be ≥ 1. This is the resolved `effective_step`. Decoders SHALL reject a value of `0`. |
-| 44–47 | u32 | `evaluated_candidate_count` | Total number of successfully evaluated candidates represented in the map. Includes normal evaluated entries, sparse‑omitted perfect intervals (positive `freq_delta_start` and type‑1 long‑jump expansions), and evaluated candidates later omitted by sparse emission. Excludes `FLAG_SKIPPED` placeholders, `FLAG_INVALID` saturated‑skipped entries, and type‑0 long‑jump gaps. SHALL be `0` for an empty map. |
+| 44–47 | u32 | `evaluated_candidate_count` | Total number of successfully evaluated candidates represented in the map. Includes normal evaluated entries, sparse‑omitted perfect intervals (positive `freq_delta_start` and type‑1 long‑jump expansions), and evaluated candidates later omitted by sparse emission. Excludes `FLAG_SKIPPED` placeholders, `FLAG_INVALID` saturated‑skipped entries, and type‑0 long‑jump gaps. SHALL be `0` for an empty map. *Note:* `evaluated_candidate_count` is a logical metric that includes sparse‑omitted perfect intervals. It SHALL NOT be used to validate the physical file size. The physical serialized entry count is strictly `(file_size − 64) / 16`. |
 | 48–55 | u64 | `xxh3_64` | Canonical map data checksum, computed with XXH3‑64 seed 0. Field zeroed during computation. Coverage: 64‑byte header and all 16‑byte map entries. |
 | 56–63 | u64 | `window_duration` | Long‑term measurement window, in base time units. Normative maximum: `2⁶⁴ − 1` base‑time units. SHALL be `0` when `long_term_scan == 0`. When `long_term_scan == 1`, SHALL be the actual window duration used; a value of `0` is permitted only for a degenerate scan. Decoders SHALL reject `window_duration != 0` when `long_term_scan == 0`. |
 
@@ -3037,7 +3115,9 @@ The `xxh3_64` field contains the XXH3‑64 checksum computed as follows:
 3. Compute XXH3‑64 with seed 0 over the entire buffer.
 4. Store the result in the `xxh3_64` field.
 
-This checksum provides accidental-corruption detection and content identity. It is not a cryptographic integrity mechanism and SHALL NOT be interpreted as tamper-evident or adversarially secure.
+`xxh3_64` MAY be used for non‑adversarial deduplication and accidental‑corruption detection. Systems requiring collision‑resistant content identity SHOULD use an external cryptographic hash over canonical map data. It is not a cryptographic integrity mechanism and SHALL NOT be interpreted as tamper-evident or adversarially secure.
+
+Decoders SHALL perform only minimal framing validation before checksum verification: the file size must be at least 64 bytes, and `(file_size − 64)` must be an exact multiple of 16. No header semantic fields or entry contents SHALL be interpreted before checksum verification, except for zeroing bytes 48–55 for checksum computation.
 
 A decoder SHALL zero the `xxh3_64` field, recompute the checksum over the same canonical bytes, and compare with the stored value before any header semantic validation or entry processing. A mismatch results in `GUNZ_INVALID_LIBRARY`.
 
@@ -3139,9 +3219,10 @@ For non‑negative integers `a` (dividend) and `b` (divisor, `b > 0`), the resul
 ```
 q = floor(a / b)
 r = a - q * b
-if 2*r == b:          // exact tie
+half_b = b >> 1
+if (b & 1) == 0 and r == half_b:   // exact tie (only possible when b is even)
     if q is odd: q = q + 1
-else if 2*r > b:      // closer to q+1
+else if r > half_b:                 // closer to q+1
     q = q + 1
 ```
 
@@ -3251,8 +3332,7 @@ Let the data values be `x₀, …, xₙ₋₁` (all non‑negative 128‑bit int
        // D·(4q² + 4q + 1) is odd, so equality cannot occur.
        σ = q if q is even, else q + 1
 
-All multiplications, divisions, and comparisons in Steps 1–5 SHALL use 128‑bit unsigned arithmetic for `S`, and 256‑bit unsigned arithmetic for
-`S2`, `V`, `D`, `var_floor`, `midpoint_x4`, and `V_x4`.
+All multiplications, divisions, and comparisons in Steps 1–5 SHALL use 128‑bit unsigned arithmetic for `S`, and 256‑bit unsigned arithmetic for `S2`, `V`, `D`, and `var_floor`. The tie‑breaking expressions `midpoint_x4` and `V_x4` SHALL be computed using unsigned arithmetic wide enough to hold the true mathematical result without overflow. For Fixed Safe Profile parameters, 256‑bit arithmetic is sufficient for `midpoint_x4` and `V_x4`. Extended‑range implementations SHALL either use wider arithmetic for these two expressions or prove that their chosen width cannot overflow for all reachable inputs.
 
 The final `σ` is the correctly rounded integer standard deviation in the same unit as the input values.
 
@@ -3356,10 +3436,10 @@ Scan map metadata keys:
 | `bytecode_fingerprint` | string | Conditional ; Mandatory for Dynamic Lane. XXH3-128 fingerprint of the original bytecode stream, as a 32-character lowercase hex string, displayed in big-endian byte order as defined in §4.3. Optional in general; required for Full-profile dynamic-lane maps, as required by §6. <br> The dynamic map fingerprint salt is the lower 64 bits of the raw little-endian bytecode XXH3-128 output. Equivalently, it is the integer obtained by parsing the **last 16 hex characters** of `bytecode_fingerprint` as a big-endian 64-bit hexadecimal integer. |
 | `creation_timestamp` | string | Mandatory ; ISO 8601 UTC with millisecond precision. |
 | `session_id` | string or null | Conditional ; A unique identifier for the exploration session. If `callback_sandboxed` is `true` (Full profile), `session_id` **MUST** be a non‑null UUIDv4 string (RFC 4122); otherwise (Minimal profile) it may be `null` or any string. |
-| `callback_sandboxed` | boolean | Mandatory ; `true` if all `PURE_CALL` callbacks in this scan were executed in a sandboxed environment; `false` otherwise. Only `true` or `false` are permitted; any other value causes the metadata file to be rejected. Canonical maps must have this set to `true`. |
-| `sandbox_type` | string | Conditional ; Required if `callback_sandboxed` is `true` and at least one `PURE_CALL` callback was invoked. If no `PURE_CALL` callback was invoked, this field SHALL be the string `"none"`. |
-| `attestation_signature` | string | Conditional ; Required if `callback_sandboxed` is `true`, the implementation claims the Full profile, and at least one `PURE_CALL` callback was invoked. Not required when no `PURE_CALL` callback was invoked. An Ed25519 signature over the canonical JSON of the metadata, **after first setting the `attestation_signature` field to an empty string (`""`) and then canonicalising the resulting object**, base64‑url‑encoded, produced by the runtime's attestation key. This signature does not cover the `.gunzmap` file bytes. See §4.10 for the complete procedure.If `callback_sandboxed` is `true` and at least one `PURE_CALL` callback was invoked, this field must be present and contain a valid signature; a missing or malformed signature causes the map to be considered non‑canonical. Minimal‑profile implementations may omit this field entirely. |
-| `runtime_id` | string | Conditional ; Required if `callback_sandboxed` is `true` and at least one `PURE_CALL` callback was invoked. Not required when no `PURE_CALL` callback was invoked. A unique identifier for the runtime instance that performed the scan. |
+| `callback_sandboxed` | boolean | Mandatory. `true` if **every callback invoked during this scan — `PURE_CALL` and `STREAM` — was executed in a sandboxed environment**; `false` otherwise. Only `true` or `false` are permitted. Canonical maps must have this set to `true`. If no callback was invoked, the condition is vacuously true for a canonical map. |
+| `sandbox_type` | string | Required if `callback_sandboxed` is `true` and at least one callback was invoked. If no callback was invoked, this field SHALL be `"none"`. When any callback is sandboxed, `sandbox_type` SHALL reflect the actual sandbox mechanism used for that callback, not `"none"`. |
+| `attestation_signature` | string | Conditional ; Required if `callback_sandboxed` is `true`, the implementation claims the Full profile, and at least one callback (`PURE_CALL` or `STREAM`) was invoked. Not required when no `PURE_CALL` callback was invoked. An Ed25519 signature over the canonical JSON of the metadata, **after first setting the `attestation_signature` field to an empty string (`""`) and then canonicalising the resulting object**, base64‑url‑encoded, produced by the runtime's attestation key. This signature does not cover the `.gunzmap` file bytes. See §4.10 for the complete procedure.If `callback_sandboxed` is `true` and at least one callback (`PURE_CALL` or `STREAM`) was invoked, this field must be present and contain a valid signature; a missing or malformed signature causes the map to be considered non‑canonical. Minimal‑profile implementations may omit this field entirely. |
+| `runtime_id` | string | Conditional ; Required if `callback_sandboxed` is `true` and at least one callback (`PURE_CALL` or `STREAM`) was invoked. Not required when no `PURE_CALL` callback was invoked. A unique identifier for the runtime instance that performed the scan. |
 | `tool_version` | string | Optional ; Runtime identification |
 | `plan_parameters` | object | Mandatory ; All evaluator and scan parameters used for this map.  See **Plan parameters object** below.  |
 | `drift_enabled` | boolean | Optional ; `true` if the drift metric was computed for this scan.  Absent or `false` otherwise. |
@@ -3376,11 +3456,14 @@ saturation to 65535. <br> – `max_jitter` (integer) – maximum jitter observed
 | `map_entries_after_consolidation` | integer | Optional ; Final number of map entries after run‑length consolidation. |
 | `map_size_bytes` | integer | Optional ; Total size of the `.gunzmap` file in bytes: `64 + (serialized_entry_count × 16)`, where `serialized_entry_count` is the number of 16‑byte map entries in the file after final consolidation and gap insertion. This is not the same as `evaluated_candidate_count`. |
 | `stats_fingerprint` | string | Optional ; XXH3‑128 of companion `.gunzstats` or `.gunzstatz` file. The fingerprint is computed over the entire file bytes, from the first byte of the `magic` field through the end of the file, using `XXH3‑128` with seed 0. For `.gunzstatz`, this includes the compressed delta stream. For zero‑candidate statistics files, the fingerprint is computed over the file bytes consisting only of magic and candidate count. |
-| `scan_cost` | object | Optional ; record of scan resource usage. Some fields are deterministic and reproducible; others are explicitly non‑deterministic and informational only. Containing: <br> – `cpu_time_ms` (u64, optional) – non‑deterministic. SHALL NOT be included in canonical attestation metadata. <br> – `evaluator_iterations` (integer; non‑negative) <br> – `candidates_evaluated` (integer; non‑negative) <br> – `windows_chained` (integer; non‑negative). Implementation‑defined telemetry for Phoenix‑style window chaining. Its exact meaning and computation are not prescribed by this specification. It SHALL NOT be used for reproducibility or fingerprinting, and SHALL be omitted from canonical attestation metadata. <br> – `fuel_consumed` (u64; fuel units, reflecting the actual HALT decrement) <br> – `elapsed_time_ms` (u64, optional) – elapsed real time of the scan from start to finish, as measured by a monotonic system clock.  This value is **not** deterministic; identical scans may produce different measurements. <br> – `memory_high_water_mark_bytes` (u64, optional) – peak arena memory used during the scan. <br> The fields `cpu_time_ms`, `elapsed_time_ms`, and `memory_high_water_mark_bytes` are non‑deterministic and informational only. They SHALL NOT be used for reproducibility or fingerprinting, and SHALL be omitted from canonical attestation metadata. |
+| `scan_cost` | object | Optional ; record of scan resource usage. Some fields are deterministic and reproducible; others are explicitly non‑deterministic and informational only. Containing: <br> – `cpu_time_ms` (u64, optional) – non‑deterministic. SHALL NOT be included in canonical attestation metadata. <br> – `evaluator_iterations` (integer; non‑negative) <br> – `candidates_evaluated` (integer; non‑negative) <br> – `windows_chained` (integer; non‑negative). Implementation‑defined telemetry for Phoenix‑style window chaining. Its exact meaning and computation are not prescribed by this specification. It SHALL NOT be used for reproducibility or fingerprinting, and SHALL be omitted from canonical attestation metadata. <br> – `fuel_consumed` (u64; fuel units, reflecting the actual HALT decrement. For Static‑Lane scans, `fuel_consumed` SHALL be `0` if present.) <br> – `elapsed_time_ms` (u64, optional) – elapsed real time of the scan from start to finish, as measured by a monotonic system clock.  This value is **not** deterministic; identical scans may produce different measurements. <br> – `memory_high_water_mark_bytes` (u64, optional) – peak arena memory used during the scan. <br> The fields `cpu_time_ms`, `elapsed_time_ms`, and `memory_high_water_mark_bytes` are non‑deterministic and informational only. They SHALL NOT be used for reproducibility or fingerprinting, and SHALL be omitted from canonical attestation metadata. |
 | `resonance_quality` | object | Optional ; deterministic summary of scan findings.  The following optional fields **MAY** be present: <br> – `max_per_block_advance_regularity` (integer) – The largest per‑block advance regularity observed across all blocks and candidates in the scan, expressed in ticks × 100.  Computed as described in §3.11.  Zero or absent if not computed.  Without drift, this value equals the per‑jitter‑point pooled advance regularity. |
 | `system_info` | object | Optional ; host machine details. Informational and non-deterministic. SHALL NOT be included in canonical attestation metadata. |
 | `stability_tolerance_time` | integer | Optional ; Derived plateau tolerance used for `stability_width`. Informational only. Must match `max(quantum, round_half_even(reference_block_time / 1_000_000))`. See Derived stability tolerance field. |
-| `degenerate_scan` | boolean | Optional ; `true` if `long_term_scan == 1`, `window_duration == 0`, and all successfully evaluated candidates were excluded because `max_eval_iterations` was zero. Absent or `false` otherwise. | 
+| `degenerate_scan` | boolean | Optional ; `true` if `long_term_scan == 1`, `window_duration == 0`, and all candidate positions in evaluated zones were emitted as evaluator‑skipped `FLAG_INVALID` entries because `max_eval_iterations` was zero. Absent or `false` otherwise. | 
+| `callbacks_invoked` | boolean | Optional. `true` if any callback (`PURE_CALL` or `STREAM`) was invoked during the scan; `false` otherwise. Improves auditability when `callback_sandboxed` is vacuously true. |
+
+Normative grouping: For a scan map, the following fields SHALL always be present: `gunz_version`, `map_fingerprint`, `creation_timestamp`, `callback_sandboxed`, `plan_parameters`, `scan_zones`. The following SHALL be present when their condition is true: `bytecode_fingerprint` (Dynamic Lane), `sandbox_type` (if `callback_sandboxed` is true and a callback was invoked), `attestation_signature` and `runtime_id` (same condition, Full profile), `long_term_scan` (must mirror `plan_parameters.long_term_scan`). All other fields are optional. Derived maps SHALL use the derived‑map field set defined earlier.
 
 
 **Derived stability tolerance field**
@@ -3570,6 +3653,13 @@ Legacy snapshots that are not canonical CBOR, if supported, SHALL be converted t
 Legacy snapshots that are already canonical CBOR and signed with a still-recognised historical key SHALL be verified normally. The runtime MAY require such snapshots to be re-signed with the current key before they are used in new plans.
 
 The snapshot's identity for plan construction is its payload hash: **`XXH3‑128`** of the CBOR bytes excluding `"signature"`, represented as a 32‑character hexadecimal string. Two snapshots with different payload hashes are distinct. The runtime shall validate the signature before binding the snapshot into a plan; an invalid signature shall cause plan construction to fail with `GUNZ_INVALID_LIBRARY`. *Support for environment snapshots is optional for base conformance.*
+
+ To verify a snapshot signature:
+ 1. Decode the CBOR map.
+ 2. Verify that the decoded map is canonical CBOR as defined above.
+ 3. Construct a new canonical CBOR map equal to the original map with the `"signature"` key/value pair omitted.
+ 4. Compute Ed25519 verification over those canonical CBOR bytes using the 64‑byte signature value from the original `"signature"` key.
+ 5. The snapshot payload hash is XXH3‑128 over the same canonical CBOR bytes with `"signature"` omitted.
 
 *(Informative)* GUNZ 5.0.0 defines `timestamp` in milliseconds. Earlier revisions may have used seconds. Snapshot consumers should treat timestamps from pre‑5.0.0 snapshots accordingly.
 
@@ -3893,6 +3983,7 @@ When a map is produced with `callback_sandboxed = true` and the implementation c
 - `sandbox_type` SHALL be `"none"`.
 - `attestation_signature` SHALL NOT be required.
 - `runtime_id` SHALL NOT be required.
+- For a STREAM-only sandboxed scan, `sandbox_type` SHALL reflect the actual sandbox mechanism used, not `"none"`.
 
  The procedure is:
 
@@ -3995,7 +4086,7 @@ A compliant implementation **SHALL**:
 - On import, validate the imported map’s `time_unit` against the plan’s `time_unit` and `map_version` against the runtime’s pinned `map_version`. Any mismatch fails with `GUNZ_INVALID_LIBRARY`.
 - Validate the canonical map data checksum on import and decode by zeroing `xxh3_64` and recomputing over the 64‑byte header and all entries. Reject on mismatch.
 - Reject any `.gunzmap` file whose size is not exactly `64 + entry_count × 16`.
-- Use `xxh3_64` for content identity and deduplication; use XXH3‑128 map fingerprint for provenance identity.
+- Use `xxh3_64` for non‑adversarial deduplication and accidental‑corruption detection; systems requiring collision‑resistant content identity SHOULD use an external cryptographic hash over canonical map data. Use XXH3‑128 map fingerprint for provenance identity.
 - Maps containing legacy threshold‑zero values SHALL NOT be imported until those thresholds have been normalised.
 - Imported maps SHALL be fully validated according to §4.2.1 and §6, including all header field semantics, `effective_step ≥ 1`, reserved bytes, `evaluated_candidate_count` consistency, and entry‑flag/long‑jump/delta validation.
 
@@ -4008,7 +4099,7 @@ A compliant implementation **SHALL**:
 - Reject bytecode with `time_unit > 12` or `target_ticks = 0`.
 - Reject bytecode where any `ZONE` has `freq_high < freq_low` or frequency `0`.
 - Reject bytecode where any `ZONE` or `SKIP_ZONE` violates grid‑alignment.
-- If `sandboxed_callbacks_required` is set and at least one `PURE_CALL` is invoked, the runtime must produce an attestation signature; otherwise reject with `GUNZ_INVALID_LIBRARY`. If no `PURE_CALL` is invoked, no attestation is required.
+- If `sandboxed_callbacks_required` is set and at least one callback (`PURE_CALL` or `STREAM`) was invoked, the runtime must produce an attestation signature; otherwise reject with `GUNZ_INVALID_LIBRARY`. If set but no callback is invoked, no attestation is required.
 - Implementations SHALL reject bytecode or map files with versions not exactly matching the runtime’s pinned versions (`0x00040000` for bytecode, `0x0062` for map).
 - Oracle opcodes are optional; unsupported companions reject them with `GUNZ_MALFORMED_BYTECODE`.
 - `LIBREF` SHALL clear `ADVANCE`, `ROUND`, and `DELTA`, restore effective multiplier/rounding mode, and preserve pending `PURE_CALL`.
@@ -4044,6 +4135,7 @@ A compliant implementation **SHALL**:
 - Decoders SHALL reject a map header where reserved byte 28 or 29 is non‑zero.
 - Decoders SHALL reject a map header where any reserved bit in `map_flags` is set.
 - Decoders SHALL reject a map header where `map_type > 1`.
+-  When decoding a map header with `map_type == 0`, decoders SHALL treat stored detrimental thresholds as irrelevant and SHALL NOT use them for any semantic purpose, regardless of the values stored in the file.
 - Decoders SHALL reject a map header where `detrimental_jitter_threshold == 0` or `detrimental_advance_regularity_threshold == 0`.
 - Decoders SHALL reject a map header where `map_version != 0x0062`.
 - Decoders SHALL reject a map header where `reference_source > 3`.
@@ -4074,6 +4166,12 @@ A compliant implementation **SHALL**:
 - Decoders SHALL reject `FLAG_SKIPPED` placeholders with any central‑direction flag set.
 - Decoders SHALL reject `FLAG_INVALID` entries with any central‑direction flag set.
 - Library profiles SHALL NOT emit rounding metadata; decoders SHALL ignore rounding metadata if encountered.
+- Decoders SHALL reconstruct `evaluated_candidate_count` as follows while decoding the entry stream:
+   -   For a normal evaluated entry, add `(freq_delta_start / effective_step) + run_length`.
+   -   For a `FLAG_SKIPPED` or `FLAG_INVALID` normal entry, add 0.
+   -   For a type‑0 long‑jump, add 0.
+   -   For a type‑1 long‑jump, add `gap / effective_step`.
+ The resulting sum SHALL equal the header field `evaluated_candidate_count`. If the sum would exceed `UINT32_MAX`, the map SHALL be rejected.
 
 
 ---
@@ -4157,8 +4255,9 @@ A compliant implementation **SHALL**:
 
 - The non‑long‑term N‑search is bounded only by `MAX_N = 2³¹ − 1`. Because `max_eval_iterations` does not limit that search, a conformant implementation should either use a proven equivalent shortcut or enforce an external resource limit when executing untrusted dynamic‑lane programs.
 
-- **Resource limits for untrusted programs (informative):**
-  The non‑long‑term N‑search is bounded only by `MAX_N = 2³¹ − 1` in the normative algorithm. Implementations that execute untrusted dynamic‑lane bytecode SHOULD enforce an external CPU or memory limit per `ExecutionPlan_Run`. If such a limit is exceeded, the implementation SHOULD abort the entire run and return an implementation‑defined resource‑exhaustion status. It SHOULD NOT return a partial map. This preserves bit‑identical output for all completed runs, because aborted runs produce no map.
+- **Resource limits for untrusted programs:**
+  The non‑long‑term N‑search is bounded only by `MAX_N = 2³¹ − 1` in the normative algorithm. Implementations executing untrusted bytecode SHALL enforce an implementation‑defined CPU and memory limit per `ExecutionPlan_Run`. If exceeded, the run SHALL abort with `GUNZ_RESOURCE_EXHAUSTED`
+ and SHALL NOT return a partial map. This preserves bit‑identical output for all completed runs, because aborted runs produce no map.
 
 - **Sparse‑map accumulator overflow example (informative):**
   When `sparse_map` is active and consecutive intervals are omitted, the generator accumulates their run‑lengths into the next emitted entry's `freq_delta_start`. The accumulated offset is limited to ±32767. If adding another omitted interval would exceed that range, the generator first emits a long‑jump entry with type `1` for the accumulated gap, resets the accumulator to zero, and then continues. If the accumulator ever exceeds `max_lj_gap`, the generator automatically splits it into multiple long‑jump entries, each with a gap of `max_lj_gap` except the last, before evaluating the delta. After all entries have been processed, any remaining accumulator is flushed as a final long‑jump entry (or entries) with type `1`. (`max_lj_gap` is defined in §4.2.)
@@ -4252,6 +4351,10 @@ This specification defines the architectural contract. Future revisions will pre
 
 
 ---
+
+## Appendix B — Example: Decoding a GUNZ 4.0.0 Resonance Map
+
+This example walks through the decoding of a synthetic dense map containing all major entry types. All multi‑byte integers are little‑endian; frequencies are in 10⁻⁵ Hz units unless converted for display. The `.gunzmap` file contains only the map header and entries; there is no bytecode header. It is non‑conformant as a file: the checksum is deliberately zero. It is for structural decoding illustration only.
 
 #### B.1 Raw Map Hex Dump
 
@@ -4493,6 +4596,7 @@ The following table provides the engineering rationale for selected normative co
 | 6 | `GUNZ_INVALID_OBJECT` | Validation | An `object_id` is invalid or not allocated. |
 | 7 | `GUNZ_ITERATION_LIMIT_EXCEEDED` | Runtime | Scan iteration limit exceeded; partial map returned. |
 | 8 | `GUNZ_SANDBOX_VIOLATION` | Security | A sandboxed callback attempted a forbidden operation (e.g., reading mutable memory). |
+| 9 | `GUNZ_RESOURCE_EXHAUSTED` | Runtime | Untrusted bytecode exceeded an implementation‑defined CPU or memory limit. No partial map is returned. |
 
 **Category notes:**
 - **Syntax:** Bytecode parsing errors.
@@ -4544,8 +4648,9 @@ Vector 1 — Full pipeline from raw samples:
 
     80 < 144 → σ = 1
 
-Vector 2 — Exact tie from variance numerator:
+Vector 2 — Round‑up case above midpoint:
 
+```
     V = 104
     n = 4
 
@@ -4557,7 +4662,31 @@ Vector 2 — Exact tie from variance numerator:
     V_x4 = 4 × 104 = 416
 
     416 > 400 → σ = 3
+```
 
+
+```
+Vector 3 — Exact tie, q even
+V = 100
+n = 4
+D = 16
+var_floor = 100 // 16 = 6
+q = isqrt_floor(6) = 2
+midpoint_x4 = 16 × (4×4 + 4×2 + 1) = 400
+V_x4 = 4 × 100 = 400
+tie: q is even → σ = 2
+```
+
+
+```
+Vector 4 — Exact tie, q odd
+q = 3
+D = 16
+midpoint_x4 = 16 × (4×9 + 4×3 + 1) = 16 × 49 = 784
+V = 196
+V_x4 = 4 × 196 = 784
+tie: q is odd → σ = 4
+```
 
 ### Physical stability width
 
@@ -4595,6 +4724,7 @@ Vector 2 — Exact tie from variance numerator:
 - `quantum == 0`, `target_ticks == 0`, `mult_num == 0`, `mult_den == 0`, or `round_mode > 3` rejected.
 - `time_unit > 12` rejected.
 - Detrimental thresholds stored as `0` rejected.
+- `map_type = 0` decoder acceptance of nonzero nondefault detrimental thresholds (decodable but noncanonical).
 - Empty map: no entries and `base_freq == 0`; non‑zero `base_freq` rejected.
 - `evaluated_candidate_count` matches decoded entry stream after full validation.
 - If `.gunzmeta.stability_tolerance_time` is present, it SHALL equal the
@@ -4774,4 +4904,285 @@ A real snapshot must also include a `signature` key (byte string of 64 bytes) pl
 
 ---
 
-*GUNZ 5.0.0C — Graduated Underlying Navigation Zones — specification complete.*
+# Appendix G - Fixed Safe Profile Overflow‑Safety Proof (Normative)
+
+> **⚠️ Do not multiply independent maxima for sample count and sample magnitude. These quantities are coupled by the evaluator’s block‑simulation rules.**
+
+> **Scope:** This proof applies to core GUNZ operation without optional companion extensions. If any companion extension is enabled — including, but not limited to, GUNZ‑DRIFT — the companion SHALL define and prove its own accumulator‑width guarantees, or the implementation SHALL provide a separate formal proof for the extended parameter space.
+
+---
+
+## G.1 Parameter Caps
+
+| Parameter | Hard cap |
+|-----------|----------|
+| `target_ticks` | \(2^{25}\) |
+| `quantum` | \(2^{30}\) |
+| `mult_num` | \(2^{20}\) |
+| `mult_den` | \(2^{20}\) |
+| `window_duration` | \(2^{45}\) |
+| `time_unit` | \(\le 12\) |
+| `reference_block_time` | \(\le 2^{32}-1\) |
+
+Let:
+
+```text
+W = window_duration
+T = cycle time
+H = (hold_cycles + sep_cycles) × T
+```
+
+We have:
+
+```text
+T < 2^57
+H < 2^66
+```
+
+**Jitter window width:**
+
+```text
+0            → 10000  → 21 points
+1..255       → value × 1000 → up to 511 points
+```
+
+Therefore the worst‑case number of jitter points is:
+
+```text
+J_max = 511
+```
+
+All bounds below use `J_max = 511`.
+
+---
+
+## G.2 Bounds for Total Block‑Time Samples
+
+Total block‑time jitter uses the **general integer standard deviation algorithm** of §4.5.3, because total block times are not a two‑valued multiset. The accumulators `S` and `S2` are required here.
+
+### G.2.1 Sum accumulator \(S\)
+
+For one long‑term jitter point, the worst‑case sum occurs at the minimum possible raw block time \(r=1\):
+
+```text
+S_j ≤ W + 1 + ⌈W / 1⌉ × H
+    = W + 1 + WH
+```
+
+With \(W = 2^{45}\), \(H = 2^{66}\):
+
+```text
+S_j < 2^45 + 1 + 2^45 × 2^66
+    < 2^112
+```
+
+Across all \(J_{max} = 511\) jitter points:
+
+```text
+S_total < 511 × 2^112
+        < 2^9 × 2^112
+        = 2^121
+        < 2^128
+```
+
+✅ `S` fits in **128 bits**.
+
+### G.2.2 Sum of squares \(S2\)
+
+For one jitter point:
+
+```text
+S2_j ≤ (W / r + 1) × (r + H)²
+```
+
+Let \(g(r) = (W/r + 1)(r+H)^2\).
+
+At \(r = 1\):
+
+```text
+g(1) < (2^45 + 1)(1 + 2^66)²
+     < 2^45 × 2^132
+     = 2^177
+```
+
+At the maximum raw block time under `DELTA`, \(r_{max} < 2^{87}\):
+
+```text
+g(r_max) < (1)(2^87 + 2^66)²
+         < 2^174
+```
+
+Therefore the global maximum is at \(r = 1\):
+
+```text
+S2_j < 2^177
+```
+
+Across all \(J_{max} = 511\) points:
+
+```text
+S2_total < 511 × 2^177
+         < 2^9 × 2^177
+         = 2^186
+         < 2^256
+```
+
+✅ `S2` fits in **256 bits**.
+
+---
+
+## G.3 Bounds for Advance Regularity Samples
+
+**Normative change:** Advance regularity SHALL be computed exclusively with the mandatory two‑valued closed form. The general sample‑by‑sample `S`/`S2` accumulation SHALL NOT be used for advance regularity.
+
+For advance regularity, the two distinct values are:
+
+```text
+a = 100 × adv_lo_cont
+b = 100 × adv_hi_cont
+```
+
+with multiplicities:
+
+```text
+n_a = N_lo
+n_b = N_hi
+```
+
+and:
+
+```text
+n = n_a + n_b
+```
+
+The variance numerator and denominator are:
+
+```text
+V = n_a · n_b · (a − b)²
+D = n²
+```
+
+### G.3.1 Total cycle count bound
+
+Across one jitter point, the total number of cycles is the number of blocks multiplied by the cycles per block (`N`). The number of blocks is bounded by `W/r + 1`. For `r = 1`, this is `W + 1`. The maximum cycles per block is bounded by `MAX_N = 2³¹ − 1`, because `adv_lo_cont` may be zero and `N` may exceed `target_ticks`. Therefore, the cycles per jitter point is bounded by:
+
+```text
+n_j ≤ (W + 1) × MAX_N
+    < 2^46 × 2^31
+    = 2^77
+```
+
+Across all \(J_{max} = 511\) jitter points:
+
+```text
+n_total = n_a + n_b ≤ 511 × 2^77
+        < 2^9 × 2^77
+        = 2^86
+```
+
+### G.3.2 Advance difference bound
+
+The difference between the two advance values is bounded by:
+
+```text
+a − b = 100 × (adv_hi_cont − adv_lo_cont)
+      ≤ 100 × (mult_num / mult_den)
+      ≤ 100 × 2^20
+      = 2^26.6
+```
+
+Therefore:
+
+```text
+(a − b)² ≤ (2^26.6)² = 2^53.2
+```
+
+### G.3.3 Variance numerator \(V\)
+
+Maximise:
+
+```text
+V = n_a · n_b · (a − b)²
+```
+
+Given \(n_a + n_b = n_total\), the product \(n_a · n_b\) is maximised when:
+
+```text
+n_a = n_b = n_total / 2
+```
+
+Thus:
+
+```text
+V ≤ (n_total² / 4) × (a − b)²
+  ≤ (2^172 / 4) × 2^53.2
+  = 2^170 × 2^53.2
+  = 2^223.2
+```
+
+✅ `V` fits in **256 bits**.
+
+### G.3.4 Denominator \(D\)
+
+```text
+D = n² ≤ (2^86)² = 2^172
+```
+
+✅ `D` fits in **256 bits**.
+
+---
+
+## G.4 Intermediate Variance Steps
+
+For the exact rational standard deviation step, using the corrected bounds:
+
+```text
+V < 2^224
+D < 2^172
+```
+
+The algorithm computes:
+
+```text
+var_floor = V // D
+q = isqrt_floor(var_floor)
+midpoint_x4 = D × (4q² + 4q + 1)
+V_x4 = 4V
+```
+
+We have:
+
+```text
+var_floor < 2^224
+q² ≤ var_floor < 2^224  ⇒  q < 2^112
+midpoint_x4 ≤ 4Dq² + 4Dq + D
+            ≤ 4V + 4√(V·D) + D
+            < 4×2^224 + 4×2^{(224+172)/2} + 2^172
+            = 2^226 + 2^200 + 2^172
+            < 2^227
+V_x4 = 4V < 2^226
+```
+
+All fit comfortably in **256 bits**.
+
+---
+
+## G.5 Conclusion
+
+Under the Fixed Safe Profile caps, in core operation without companion extensions:
+
+- Total block‑time jitter uses the general algorithm:
+  - `S` fits in **128 bits**.
+  - `S2`, `V`, `D`, `var_floor`, `midpoint_x4`, `V_x4` fit in **256 bits**.
+
+- Advance regularity uses the **mandatory two‑valued closed form**:
+  - No `S` or `S2` accumulator is used.
+  - `V` and `D` fit in **256 bits**.
+
+- The `DELTA` override does not exceed these bounds, because advance regularity ignores `DELTA` magnitudes and uses the continuous advance values, while the closed form avoids the unbounded general sum accumulator.
+
+**No 512‑bit arithmetic is required under these caps, for any permitted jitter window radius.**
+
+---
+
+*GUNZ 5.0.0E — Graduated Underlying Navigation Zones — specification complete.*
