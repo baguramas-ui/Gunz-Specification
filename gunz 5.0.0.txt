@@ -15,7 +15,7 @@ Co-authored by DeepSeek and Corentin Amice.
 
 ---
 
-# GUNZ 5.0.0E — Graduated Underlying Navigation Zones -
+# GUNZ 5.0.0F — Graduated Underlying Navigation Zones -
 **ISA · Runtime · Library**
 
 ---
@@ -906,6 +906,7 @@ typedef enum {
     GUNZ_INVALID_OBJECT = 6,
     GUNZ_ITERATION_LIMIT_EXCEEDED = 7,
     GUNZ_SANDBOX_VIOLATION = 8,
+    GUNZ_RESOURCE_EXHAUSTED = 9
 } GUNZ_Result;
 ```
 
@@ -2224,27 +2225,27 @@ This assignment SHALL be performed before final map‑entry consolidation and be
 
 **Three‑Way Metric Model**
 
-GUNZ does not compute a single scalar quality score. Instead, each evaluated candidate carries three independent lower‑is‑better metrics. For these metrics, the **central total time** is:
+GUNZ does not compute a single scalar quality score. Instead, each evaluated candidate carries three independent lower‑is‑better metrics. 
+For these metrics, the **central total time** is:
 
-- For non‑long‑term scan: single‑block `total_time` at jitter offset Δ = 0;
-- For long‑term scans, `block_time_inaccuracy` is the absolute deviation of the central total‑time sum divided by its block count — both taken at jitter offset Δ = 0 — from `reference_block_time`, rounded half‑to‑even. It SHALL be computed from the exact rational deviation formula in Step 3:
+- non‑long‑term scan: single‑block `total_time` at jitter offset Δ = 0;
+- long‑term scan: `total_time_lt` at jitter offset Δ = 0.
+
+This is the same central total time used for `FLAG_CENTRAL_ABOVE` and `FLAG_CENTRAL_BELOW`.
+
+
+**1. `block_time_inaccuracy`**
+
+For non‑long‑term scans, `block_time_inaccuracy` is the absolute deviation of the single‑block `total_time` at jitter offset Δ = 0 from `reference_block_time`, expressed in base time units:
 
 ```text
-sum_total / block_count
+block_time_inaccuracy = |total_time − reference_block_time|
 ```
 
-and
-
-```text
-reference_block_time
-```
-
-rounded half‑to‑even, where:
+For long‑term scans, `block_time_inaccuracy` is the absolute deviation of the central total‑time sum divided by its block count — both taken at jitter offset Δ = 0 — from `reference_block_time`, rounded half‑to‑even. It SHALL be computed from the exact rational deviation formula in Step 3:
 
 - `sum_total` is the sum of `total_time_i` over all blocks at jitter offset Δ = 0,
 - `block_count` is the number of those blocks.
-
-It SHALL be computed as:
 
 ```text
 block_time_inaccuracy =
@@ -2258,25 +2259,7 @@ block_time_inaccuracy =
     )
 ```
 
-It SHALL be computed from the exact rational deviation formula in Step 3, not from the saturated map‑entry value.
-
-This is the same central total time used for `FLAG_CENTRAL_ABOVE` and `FLAG_CENTRAL_BELOW`.
-
-1. **`block_time_inaccuracy`**
-
-   For non‑long‑term scans, `block_time_inaccuracy` is the absolute   deviation of the single‑block `total_time` at jitter offset Δ = 0 from  `reference_block_time`, expressed in base time units:
-
-       block_time_inaccuracy = |total_time − reference_block_time|
-
-   For long‑term scans, `block_time_inaccuracy` is the correctly rounded  average of per‑block absolute deviations from `reference_block_time`, as  defined by the exact rational deviation formula in Step 3 long‑term mode:
-
-       block_time_inaccuracy =
-           round_half_even(
-               |sum(total_time_i) − reference_block_time × block_count|
-               / block_count
-           )
-
-   It SHALL NOT be derived from the rounded central total time  `total_time_lt`.
+It SHALL NOT be computed as the arithmetic average of per‑block absolute deviations. It SHALL NOT be derived from `total_time_lt` alone or from the saturated map‑entry value.
 
    *Usefulness:* This is the primary indicator of how closely the timing  matches the desired target. It is directly comparable across scans with  the same `time_unit`.
 
@@ -3438,8 +3421,8 @@ Scan map metadata keys:
 | `session_id` | string or null | Conditional ; A unique identifier for the exploration session. If `callback_sandboxed` is `true` (Full profile), `session_id` **MUST** be a non‑null UUIDv4 string (RFC 4122); otherwise (Minimal profile) it may be `null` or any string. |
 | `callback_sandboxed` | boolean | Mandatory. `true` if **every callback invoked during this scan — `PURE_CALL` and `STREAM` — was executed in a sandboxed environment**; `false` otherwise. Only `true` or `false` are permitted. Canonical maps must have this set to `true`. If no callback was invoked, the condition is vacuously true for a canonical map. |
 | `sandbox_type` | string | Required if `callback_sandboxed` is `true` and at least one callback was invoked. If no callback was invoked, this field SHALL be `"none"`. When any callback is sandboxed, `sandbox_type` SHALL reflect the actual sandbox mechanism used for that callback, not `"none"`. |
-| `attestation_signature` | string | Conditional ; Required if `callback_sandboxed` is `true`, the implementation claims the Full profile, and at least one callback (`PURE_CALL` or `STREAM`) was invoked. Not required when no `PURE_CALL` callback was invoked. An Ed25519 signature over the canonical JSON of the metadata, **after first setting the `attestation_signature` field to an empty string (`""`) and then canonicalising the resulting object**, base64‑url‑encoded, produced by the runtime's attestation key. This signature does not cover the `.gunzmap` file bytes. See §4.10 for the complete procedure.If `callback_sandboxed` is `true` and at least one callback (`PURE_CALL` or `STREAM`) was invoked, this field must be present and contain a valid signature; a missing or malformed signature causes the map to be considered non‑canonical. Minimal‑profile implementations may omit this field entirely. |
-| `runtime_id` | string | Conditional ; Required if `callback_sandboxed` is `true` and at least one callback (`PURE_CALL` or `STREAM`) was invoked. Not required when no `PURE_CALL` callback was invoked. A unique identifier for the runtime instance that performed the scan. |
+| `attestation_signature` | string | Conditional ; Required if `callback_sandboxed` is `true`, the implementation claims the Full profile, and at least one callback (`PURE_CALL` or `STREAM`) was invoked. Not required when no callback of any kind was invoked. An Ed25519 signature over the canonical JSON of the metadata, **after first setting the `attestation_signature` field to an empty string (`""`) and then canonicalising the resulting object**, base64‑url‑encoded, produced by the runtime's attestation key. This signature does not cover the `.gunzmap` file bytes. See §4.10 for the complete procedure.If `callback_sandboxed` is `true` and at least one callback (`PURE_CALL` or `STREAM`) was invoked, this field must be present and contain a valid signature; a missing or malformed signature causes the map to be considered non‑canonical. Minimal‑profile implementations may omit this field entirely. |
+| `runtime_id` | string | Conditional ; Required if `callback_sandboxed` is `true` and at least one callback (`PURE_CALL` or `STREAM`) was invoked. Not required when no callback of any kind was invoked. A unique identifier for the runtime instance that performed the scan. |
 | `tool_version` | string | Optional ; Runtime identification |
 | `plan_parameters` | object | Mandatory ; All evaluator and scan parameters used for this map.  See **Plan parameters object** below.  |
 | `drift_enabled` | boolean | Optional ; `true` if the drift metric was computed for this scan.  Absent or `false` otherwise. |
@@ -3487,7 +3470,7 @@ If `stability_tolerance_time` is present and does not match the formula above, t
 - For **scan maps**, the keys listed in the table above are mandatory, except as explicitly stated elsewhere.
 - For **derived maps**, `.gunzmeta` is optional.
 
-If no `PURE_CALL` callback was invoked during a scan:
+If no callback of any kind (`PURE_CALL` or `STREAM`) was invoked during a scan:
 - `callback_sandboxed` SHALL be `true` for a canonical map.
 - `sandbox_type` SHALL be the string `"none"`.
 - `attestation_signature` SHALL NOT be required.
@@ -3977,13 +3960,15 @@ The minimal‑length computation SHALL be performed using integer arithmetic wid
 
 ### 4.10 Attestation Procedure (Normative, Full-profile only)
 
-When a map is produced with `callback_sandboxed = true` and the implementation claims the Full profile, the runtime shall generate an Ed25519 attestation signature and record it in the `.gunzmeta` file. The attestation procedure defined in this section applies only when at least one `PURE_CALL` callback was invoked. For a no-callback canonical map:
+When a map is produced with `callback_sandboxed = true` and the implementation claims the Full profile, the runtime shall generate an Ed25519 attestation signature and record it in the `.gunzmeta` file. The attestation procedure defined in this section applies only when at least one callback (`PURE_CALL` or `STREAM`) was invoked.
 
+ For a no-callback canonical map:
 - `callback_sandboxed` SHALL be `true`.
 - `sandbox_type` SHALL be `"none"`.
 - `attestation_signature` SHALL NOT be required.
 - `runtime_id` SHALL NOT be required.
-- For a STREAM-only sandboxed scan, `sandbox_type` SHALL reflect the actual sandbox mechanism used, not `"none"`.
+
+For a STREAM-only sandboxed scan, `sandbox_type` SHALL reflect the actual sandbox mechanism used, not `"none"`.
 
  The procedure is:
 
@@ -5185,4 +5170,4 @@ Under the Fixed Safe Profile caps, in core operation without companion extension
 
 ---
 
-*GUNZ 5.0.0E — Graduated Underlying Navigation Zones — specification complete.*
+*GUNZ 5.0.0F — Graduated Underlying Navigation Zones — specification complete.*
