@@ -1,4 +1,4 @@
-# GUNZ‑TIDE 1.1.6 — Phase‑Selection and Multi‑Map Robustness Companion
+# GUNZ‑TIDE 1.1.7 — Phase‑Selection and Multi‑Map Robustness Companion
 
 *Companion to GUNZ 5.0.0*
 
@@ -6,6 +6,7 @@
 
 ## Version History
 
+- **v1.1.7:** Added bytecode `max_eval_iterations` clamp per GUNZ 5.0.0 §3.4.1. Specified streaming callback interaction during final map generation. Clarified deferred `ORACLE` execution and budget. Made flip‑count phase order explicit. Added gate timing clarification for `stability_width_min`. Added optional note about `FLAG_AVOID` inclusion in summaries.
 - **v1.1.6:** Clarified that `tide_central_flip_counts` includes only candidates evaluated in all phases. Clarified `.gunztide` emission when no phase is admissible.
 - **v1.1.5:** Clarified that callback failure aborts the entire TIDE run and discards all partial output. Made iteration budget multiplication use truncated per‑zone candidate counts. Renamed “Phase 0 nominal map” to “nominal static map computed from `P0`” for export clarity. Made `.gunztide` absence explicit on callback abort.
 - **v1.1.4:** Corrected the per‑candidate central flip count from a fractional total‑variation formula to a strictly integer transition count. Flips now count only direct `+1 ↔ −1` phase transitions.
@@ -120,7 +121,7 @@ After applying all overrides, `P_p` must satisfy all core plan‑validation rule
 
 If any phase fails validation, plan construction SHALL fail with `GUNZ_INVALID_LIBRARY`.
 
-`window_duration` SHALL NOT be modifiable by TIDE 1.1.6. If a phase attempts to override it, plan construction SHALL fail with `GUNZ_INVALID_LIBRARY`.
+`window_duration` SHALL NOT be modifiable by TIDE 1.1.7. If a phase attempts to override it, plan construction SHALL fail with `GUNZ_INVALID_LIBRARY`.
 
 For long‑term scans, each phase’s `max_eval_iterations` SHALL be recomputed from:
 
@@ -129,6 +130,12 @@ max_eval_iterations_p = ceil(nominal_window_duration / quantum_p)
 ```
 
 using 128‑bit unsigned arithmetic, saturated to `2⁶⁴ − 1`, exactly as core §3.4.1.
+
+**Bytecode cap (normative).**
+
+For plans constructed from bytecode (Static Lane or Dynamic Lane), the recomputed `max_eval_iterations_p` SHALL be clamped to `2³²` after the division, exactly as required by GUNZ 5.0.0 §3.4.1.
+
+Native `ExecutionPlan` configurations MAY exceed this cap only if the operator explicitly acknowledges the extended temporal depth.
 
 **Reference source rules:**
 
@@ -158,6 +165,8 @@ If a key is absent, that gate is inactive.
 
 A phase `p` is **admissible** if, for every successfully evaluated dense‑stream candidate in included zones, all gated metrics satisfy their bounds. Comparisons use **full‑precision internal values**, not saturated map fields.
 
+The `stability_width_min` gate is checked after Phase 2 completes for the phase, using the `stability_width_internal` computed by Phase 2. All other gates are checked after Phase 1.
+
 The candidate scope for gates and summaries SHALL be **successfully evaluated dense‑stream candidates**:
 
 - Included: ordinary evaluated candidates, sparse‑omitted perfect intervals later represented by type‑1 long‑jump entries, and sparse‑omitted intervals later folded into positive `freq_delta_start`.
@@ -168,6 +177,8 @@ A phase that has **zero successfully evaluated dense‑stream candidates** SHALL
 Such a phase produces no summary vector, is not ranked, and cannot be selected.
 
 A phase that fails any gate is discarded and produces no map.
+
+*(Optional note)* `FLAG_AVOID` candidates are successfully evaluated and are included in summaries unless a future TIDE extension explicitly excludes them. Users who want to ignore detrimental candidates should gate on the corresponding metric directly.
 
 ---
 
@@ -278,7 +289,7 @@ A separate `.gunztide` JSON file SHALL be produced, serialised according to RFC 
 | Key | Type | Description |
 |-----|------|-------------|
 | `gunz_version` | string | `"5.0.0"` |
-| `tide_version` | string | `"1.1.6"` |
+| `tide_version` | string | `"1.1.7"` |
 | `tide_phases` | array | Original phase configuration |
 | `tide_metric_preference` | array | Preference order |
 | `tide_gates` | object | Gates used |
@@ -315,6 +326,8 @@ flips_candidate =
 where `I_p` is `+1` if the candidate is central‑above in phase `p`, `−1` if central‑below, and `0` if exact.
 
 Transitions that pass through the exact state (`+1 → 0 → −1`) do **not** count as flips, because the candidate touches the reference boundary without reversing around it.
+
+Phase pairs are ordered by ascending phase index: `(0,1), (1,2), …, (N_phases−2, N_phases−1)`.
 
 A candidate is included in `tide_central_flip_counts` only if it is successfully evaluated in **all** phases. If a candidate is missing from any phase, it is excluded from the flip‑count aggregate.
 
@@ -356,18 +369,39 @@ No additional normative limit is imposed on `N_phases`.
 
 *(Informative)* Very large `N_phases` values may exceed the global iteration budget for all zones, resulting in no evaluated candidates. Users SHOULD choose `N_phases` commensurate with available resources and expected scan budget.
 
+**Deferred companion operations.**
+
+Deferred operations (`ORACLE`, `EXPORT_ORACLE`, `IMPORT`, `STREAM`, `EXPORT`) SHALL execute **once per plan**, after all phase evaluations and selections are complete.
+
+`ORACLE` and `EXPORT_ORACLE` use the nominal parameter set `P0` and consume budget from `remaining_budget` after the TIDE zone pre‑pass, exactly as specified in GUNZ 5.0.0 §3.11.
+
 ---
 
 ## 8. Deferred Operations
 
-Deferred operations (`ORACLE`, `EXPORT_ORACLE`, `EXPORT`, `IMPORT`, `STREAM`) SHALL execute **once per plan**, after all phase evaluations and selections are complete.
+Deferred operations SHALL execute in the following order:
 
-- For `ORACLE`, `EXPORT_ORACLE`, `IMPORT`, and `STREAM`, they use the nominal parameter set `P0`.
-- For `EXPORT`, the operation SHALL write the **nominal static map computed from `P0`**, using the same object table/export semantics as a static plan with `tide_enabled = false`.
-- Selected phase maps are written directly by the TIDE orchestrator using the deterministic file naming rule.
-- `EXPORT` SHALL NOT write aggregated maps, selected maps, or any phase other than the nominal static map computed from `P0`.
+1. All captured `ORACLE` queries.
+2. All captured `EXPORT_ORACLE` operations.
+3. Remaining `EXPORT`, `IMPORT`, and `STREAM` operations, in capture order.
+
+For `ORACLE` and `EXPORT_ORACLE`, they use the nominal parameter set `P0`.
+
+For `EXPORT`, the operation SHALL write the **nominal static map computed from `P0`**, using the same object table/export semantics as a static plan with `tide_enabled = false`.
+
+Selected phase maps are written directly by the TIDE orchestrator using the deterministic file naming rule.
+
+`EXPORT` SHALL NOT write aggregated maps, selected maps, or any phase other than the nominal static map computed from `P0`.
 
 The nominal static map computed from `P0` is produced independently of the TIDE selection process and MAY be emitted even if the phase whose override object is `{}` is not admissible or not selected. Its `.gunzmeta` and `.gunzstats` (if generated) follow standard static‑scan rules.
+
+**Streaming callbacks.**
+
+If the bytecode includes a `STREAM` instruction, the streaming callback SHALL receive entries from each selected phase map in phase‑index order. The callback is invoked separately for each selected phase. The callback is not informed of the phase index; its `args` are the same as in a static scan for that phase.
+
+The callback’s `output` buffer is filled with map‑entry data for the current phase, exactly as in GUNZ 5.0.0 §3.6.1.
+
+If a streaming callback returns `GUNZ_CALLBACK_FAILED`, the remaining selected phase maps and the `.gunztide` file SHALL be aborted and discarded, matching the standard streaming abort semantics of GUNZ 5.0.0.
 
 ---
 
@@ -401,7 +435,7 @@ Each selected phase map’s `.gunzmeta` is attested independently, following cor
 
 ## 11. Conformance
 
-A conformant GUNZ‑TIDE 1.1.6 implementation SHALL:
+A conformant GUNZ‑TIDE 1.1.7 implementation SHALL:
 
 - Produce bit‑identical selected maps to static scans performed with the same phase parameters.
 - Apply gates using full‑precision internal values over successfully evaluated dense‑stream candidates.
@@ -413,10 +447,12 @@ A conformant GUNZ‑TIDE 1.1.6 implementation SHALL:
 - Select exactly `tide_output_map_count` phases when enough admissible phases exist.
 - Emit a `.gunztide` file in RFC 8785 canonical JSON with the specified structure, unless a callback abort occurs.
 - Enforce the iteration budget multiplication using truncated per‑zone candidate counts, 128‑bit unsigned arithmetic, and saturation to `2⁶⁴−1`.
+- Clamp `max_eval_iterations_p` to `2³²` for bytecode‑constructed plans in long‑term scans.
 - Not invoke callbacks during ranking or gating.
 - Abort the entire run and discard all output if a callback fails during final map generation for any selected phase.
 - Preserve the standard GUNZ 5.0.0 map fingerprint and checksum for each selected map.
 - Treat deferred `EXPORT` as writing only the nominal static map computed from `P0`.
+- Handle streaming callbacks on selected phase maps as specified in §8.
 - Apply the correct `reference_source` rules for phase overrides.
 - Include only candidates evaluated in all phases in `tide_central_flip_counts`.
 
@@ -480,7 +516,7 @@ GUNZ metrics are integer step functions. TIDE phases form a discrete perturbatio
 
 ### A.3 Discrete Expectation Integration
 
-If a future TIDE extension adds an average mode, it would compute the arithmetic mean over the discrete phase distribution. The current 1.1.6 uses only max/min summaries to avoid incompatible unit mixing.
+If a future TIDE extension adds an average mode, it would compute the arithmetic mean over the discrete phase distribution. The current 1.1.7 uses only max/min summaries to avoid incompatible unit mixing.
 
 ### A.4 Topological Bifurcation Index
 
@@ -488,4 +524,4 @@ Central direction flip counts across phases are the count of direct `+1 ↔ −1
 
 ---
 
-*GUNZ‑TIDE 1.1.6 — Phase‑Selection and Multi‑Map Robustness Companion — complete.*
+*GUNZ‑TIDE 1.1.7 — Phase‑Selection and Multi‑Map Robustness Companion — complete.*
