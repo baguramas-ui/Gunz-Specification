@@ -15,7 +15,7 @@ Co-authored by DeepSeek and Corentin Amice.
 
 ---
 
-# GUNZ 5.0.0F — Graduated Underlying Navigation Zones -
+# GUNZ 5.0.0G — Graduated Underlying Navigation Zones -
 **ISA · Runtime · Library**
 
 ---
@@ -911,6 +911,8 @@ typedef enum {
 ```
 
 *Note:* `GUNZ_FUEL_EXHAUSTED` is only meaningful for implementations that implement fuel accounting.  `GUNZ_SANDBOX_VIOLATION` is defined for Full‑profile conformance.  Minimal‑profile implementations may never return this code, but they **SHALL** include it in the enumeration to maintain API compatibility.
+
+`GUNZ_RESOURCE_EXHAUSTED` is returned when an implementation‑defined CPU or memory limit for untrusted bytecode is exceeded. Minimal‑profile implementations that support untrusted bytecode SHALL include this code if they enforce such limits
 
 ```c
 void          ExecutionPlan_Acquire(ExecutionPlan *plan);
@@ -2172,7 +2174,7 @@ The per‑point values remain full‑precision throughout the aggregation; only 
 
   **Implementation note:** The 256‑bit division SHALL follow §4.5.1.  Implementations without native 256‑bit division may emulate it with  128‑bit limbs, provided the result is bit‑identical.
 
-  **Downstream tooling note:** The `block_time_inaccuracy` field produced  by this computation represents the true average of rational deviations at  the central jitter point.
+  **Downstream tooling note:** The `block_time_inaccuracy` field produced by this computation represents the absolute deviation of the exact rational mean of per‑block total times at the central jitter point.
 
   Tools reconstructing map values from `.gunzstats` SHALL NOT use the  aggregate `sum_total_block_time` and `block_count` fields to compute  central `block_time_inaccuracy`. Those fields aggregate **all** valid  jitter points, not just Δ = 0.
 
@@ -2554,6 +2556,9 @@ or equivalently:
 gap = (freq_high − freq_low)
        − (max_scan_iterations − 1) × effective_step
 ```
+
+The gap computations above SHALL use at least 64‑bit unsigned arithmetic.
+
 
 These long‑jump entries SHALL carry type `0`. In the absolute-frequency merge phase, this advances `global_merge_current` to `freq_high + effective_step`, the first grid frequency after the zone. **If this gap exceeds `max_lj_gap`, the evaluator SHALL emit a sequence of long‑jump entries, each with a gap of at most `max_lj_gap`, until the total gap is covered.**
 
@@ -3041,7 +3046,7 @@ The map header is exactly **64 bytes**. All integers are little‑endian. Reserv
 | 28 | u8 | `reserved` | reserved |
 | 29 | u8 | `reserved` | reserved |
 | 30 | u8 | `jitter_window_radius` | Scale factor for the jitter window. `0` means the default radius **10000** (21 points, ±0.1 Hz) was used. A non‑zero value `v` means the effective radius was `v × 1000` (in 10⁻⁵ Hz units). Stored value is always in range 0–255; when non‑zero the resulting radius is a multiple of 1000. Writers SHALL store `jitter_window_radius = 0` whenever the effective radius equals the default of `10000`. Decoders SHALL accept a non‑zero scale factor whose effective radius equals `10000`, but such maps are decodable but not canonical. |
-| 31 | u8 | `map_flags` | Bit field. Bit 0: reserved, must be `0`. Bit 1 (`sparse_map`): `0` = dense, `1` = sparse. Bits 2–7: reserved, must be `0`. Bit 1 records whether the map was emitted as sparse; it is distinct from the bytecode header’s `sparse_map` request flag. Decoders SHALL reject any map where any reserved bit is set, returning `GUNZ_MALFORMED_BYTECODE`. For an empty map, or for a map produced without any `ZONE` or `SKIP_ZONE` instructions, `map_flags` bit 0 SHALL be `0`. Informative: The reserved bit 0 does not indicate absence of scanning; absence of scanning is indicated by `reference_source` and entry count. |
+| 31 | u8 | `map_flags` | Bit field. Bit 0: reserved, must be `0`. Bit 1 (`sparse_map`): `0` = dense, `1` = sparse. Bits 2–7: reserved, must be `0`. Bit 1 records whether the map was emitted as sparse; it is distinct from the bytecode header’s `sparse_map` request flag. Decoders SHALL reject any map where any reserved bit is set, returning `GUNZ_MALFORMED_BYTECODE`. Informative: The reserved bit 0 does not indicate absence of scanning; absence of scanning is indicated by `reference_source` and entry count. |
 | 32 | u8 | `map_type` | `0` = standard, `1` = detrimental. Values > 1 shall cause decoders to reject the map with `GUNZ_MALFORMED_BYTECODE`. |
 | 33 | u8 | `detrimental_jitter_threshold` | Threshold for jitter in detrimental mode. Stored 0 is invalid; decoders SHALL reject. |
 | 34–35 | u16 | `detrimental_advance_regularity_threshold` | Threshold for advance regularity in detrimental mode, in base time units. Stored 0 is invalid; decoders SHALL reject. |
@@ -4337,7 +4342,7 @@ This specification defines the architectural contract. Future revisions will pre
 
 ---
 
-## Appendix B — Example: Decoding a GUNZ 4.0.0 Resonance Map
+## Appendix B — Example: Decoding a GUNZ Resonance Map
 
 This example walks through the decoding of a synthetic dense map containing all major entry types. All multi‑byte integers are little‑endian; frequencies are in 10⁻⁵ Hz units unless converted for display. The `.gunzmap` file contains only the map header and entries; there is no bytecode header. It is non‑conformant as a file: the checksum is deliberately zero. It is for structural decoding illustration only.
 
@@ -5170,4 +5175,4 @@ Under the Fixed Safe Profile caps, in core operation without companion extension
 
 ---
 
-*GUNZ 5.0.0F — Graduated Underlying Navigation Zones — specification complete.*
+*GUNZ 5.0.0G — Graduated Underlying Navigation Zones — specification complete.*
