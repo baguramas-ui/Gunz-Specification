@@ -1,11 +1,19 @@
 # GUNZ‑ORACLE — Constraint‑Query Companion Specification  
-**Version 4.4.1 — Companion to GUNZ 5.0.0**
+**Version 4.5.7 — Companion to GUNZ 5.0.0**
 
 ---
 
 ## Version History
 
-- **v4.4.1:** Stability‑width query path now uses the dense, unconsolidated Phase 2 candidate array, not consolidated map entries. Clarified dense‑array exposure requirements, multiple‑query global budget accounting, and CQR deduplication fingerprint seed.
+- **v4.5.7:** Added conformance rule that `best_stability_width_internal` SHALL be 0 for `query_class = 0`. Clarified off‑grid adjacency in Phase 2. Required `d_lo_ov` and `d_hi_ov` to be zero when `delta_override_active == 0`. Header `version` set to `0x00040507`.
+- **v4.5.6:** Required off‑grid `freq_high` in `query_class = 1` to be inserted into the dense Phase 2 candidate array before Phase 2 stability‑width computation. Removed duplicate fingerprint sentence. Header `version` set to `0x00040506`.
+- **v4.5.5:** Defined exact canonical CQR fingerprint computation. Added explicit off‑grid `freq_high` handling to the stability‑width query path. Elevated `block_time_inaccuracy` semantics for `reference_block_time = 0` to normative. Header `version` set to `0x00040505`.
+- **v4.5.4:** Made EXPORT_ORACLE file output normative with deterministic file naming `B.orc<object_id>.gunzoracle`. Prohibited recording exported file path in `.gunzmeta`. Added `reference_source` to CQR capture list and header at offset 72. Clarified `reference_block_time = 0` semantics. Added decode‑time and runtime validations for `reference_source` and `reference_block_time`. Updated reserved‑byte ranges. Added off‑grid `freq_high` candidate‑count clarification. Header `version` set to `0x00040504`.
+- **v4.5.3:** Final merged self‑contained CQR. Clarified that CQR headers record effective evaluator parameters but not query constraints or pending `PURE_CALL` specifications. Added `effective_step == 0` rejection. Added normative prohibitions against serialising query thresholds and pending callback state into the CQR header. Added normative statement that ORACLE never applies detrimental‑mode `FLAG_AVOID` marking. Tightened reserved‑byte validation. No binary layout change.
+- **v4.5.2:** Required ORACLE to capture and record the effective evaluator parameter set. Clarified that all header parameters are effective captured values. Changed §7 grid terminology from “global frequency grid” to “ORACLE query grid anchored at `freq_low`”. Added validation for `delta_override_active > 1`.
+- **v4.5.1:** Made CQR files self‑contained. Header size increased to 96 bytes. Added `jitter_window_radius`, `delta_override_active`, `d_lo_ov`, and `d_hi_ov`. Header `version` set to `0x00040501`.
+- **v4.5.0:** Initial self‑contained CQR header. Header size increased to 80 bytes. Header `version` set to `0x00040500`. Superseded.
+- **v4.4.1:** Stability‑width query path now uses the dense, unconsolidated Phase 2 candidate array, not consolidated map entries. Clarified dense‑array exposure requirements, multiple‑query global budget accounting, and CQR deduplication fingerprint seed. Added CQR header `version` `0x00040401`. Added §6.6 grid correction, temporal scaling, and provenance guidance. Clarified calibrated reference independence and temporal binding in §8.
 - **v4.4.0:** Global iteration budget interaction clarified (§6.5). §2 query‑class table now uses `min_stability_width_internal` instead of a bare mathematical symbol. CQR header `version` set to `0x00040400`.
 - **v4.3.3:** Stability‑width semantics switched from saturated map‑entry value to unsaturation internal plateau width. Operand renamed `min_stability_width_internal`; interval field renamed `best_stability_width_internal`. Conformance zero‑width rejection relaxed to diagnostic warning.
 - **v4.3.2:** Added explicit `query_class` validation. Corrected example sentinel for `u128` `max_peak_advance_regularity` operand from `65535` to `UINT128_MAX`.
@@ -20,7 +28,7 @@
 
 ## Core Integration Requirements
 
-GUNZ‑ORACLE 4.4.1 requires the following changes to the GUNZ 5.0.0 core specification:
+GUNZ‑ORACLE 4.5.7 requires the following changes to the GUNZ 5.0.0 core specification:
 
 - §2.3.1 and §2.3.3.10 must define `ORACLE` as an **84‑byte** instruction with the operand layout defined in §3.1 of this document. The old 24‑byte and 52‑byte definitions are obsolete.
 - Fuel accounting for `ORACLE` remains HIGH (100).
@@ -56,6 +64,8 @@ A query that mixes per‑candidate and stability‑width constraints **must** us
 **Long‑term scan restriction:**  
 When the captured system state has the `long_term_scan` flag active, the evaluator computes a per‑candidate mean block time across multiple cycles. The plateau‑walk pre‑filter in §6 does not model this correctly and would produce invalid results. Therefore, if `long_term_scan` is active when an `ORACLE` instruction is encountered, the query **shall be rejected** with `GUNZ_INVALID_LIBRARY`. The oracle is designed exclusively for single‑block scans.
 
+**Detrimental‑mode exclusion.** ORACLE queries SHALL NOT apply detrimental‑mode `FLAG_AVOID` marking. `map_type`, `detrimental_jitter_threshold`, and `detrimental_advance_regularity_threshold` are not captured by the `ORACLE` instruction, are not recorded in the CQR header, and SHALL NOT influence query evaluation. Consequently, no candidate is excluded or rejected because of `FLAG_AVOID`; a candidate is excluded only when `FLAG_INVALID` or `FLAG_SKIPPED` is set.
+
 ---
 
 ## 3. The `ORACLE` Opcode
@@ -86,7 +96,39 @@ All multi‑byte integers are little‑endian and tightly packed. Decoders SHALL
 `UINT128_MAX` is defined as `2¹²⁸ − 1`.  
 The exact value `UINT128_MAX` is reserved as “no constraint” and SHALL NOT be used as an actual threshold.
 
-The instruction is permitted in both static‑lane and dynamic‑lane programs, subject to the lane classification rules of GUNZ 5.0.0 §2.4. It uses the current system state (multiplier, rounding mode, delta pair, effective `effective_step`, and any pending `PURE_CALL` specification) captured at the moment the instruction is encountered. The captured `PURE_CALL` callback is **not** invoked during the query.
+The instruction is permitted in both static‑lane and dynamic‑lane programs, subject to the lane classification rules of GUNZ 5.0.0 §2.4. At the moment the instruction is encountered, ORACLE SHALL capture the **effective evaluator parameter set**, including:
+
+- `time_unit`
+- `quantum`
+- `target_ticks`
+- `mult_num`, `mult_den`
+- `round_mode`
+- `hold_cycles`, `sep_cycles`
+- `reference_block_time`
+- `reference_source`
+- `jitter_window_radius`
+- `effective_step`
+- explicit delta override state: `delta_override_active`, `d_lo_ov`, `d_hi_ov`
+- any pending `PURE_CALL` specification
+
+The pending `PURE_CALL` callback is **not** invoked during the query. The captured parameter set SHALL be written into the CQR header exactly as evaluated.
+
+Pending `PURE_CALL` specifications are captured for query execution context but are not serialised into the CQR header, as ORACLE never invokes the callback and no CQR result metric depends on it.
+
+**Operand units:**
+
+| Operand | Unit |
+|---------|------|
+| `max_block_time_inaccuracy` | base time units |
+| `max_jitter` | base time units |
+| `max_advance_regularity` | ticks × 100 |
+| `max_peak_advance_regularity` | ticks × 100 |
+
+All constraints are compared against the full‑precision internal metric values expressed in the units listed above. The `UINT128_MAX` sentinel means “no constraint” and SHALL NOT be interpreted as an actual threshold.
+
+*(Informative)* A captured `reference_block_time` of `0` is permitted only when the corresponding `reference_source` is `0` (not applicable). In that case, every `block_time_inaccuracy` constraint is evaluated against the absolute `total_time`, i.e. `|total_time − 0|`. This mode is useful for finding absolute total‑time values when no external reference exists.
+
+*(Informative)* ORACLE queries are independent of the program’s zone grid. The query’s candidate grid is anchored at its own `freq_low`, not at the global `base_freq` used by `ZONE`/`SKIP_ZONE` instructions. This allows ORACLE to query arbitrary ranges without requiring alignment to the main scan’s zone grid. When an AI agent later converts ORACLE intervals into `ZONE` instructions, the grid correction and temporal scaling rules of §6.6 SHALL be applied.
 
 ### 3.2 Output Destination
 
@@ -117,7 +159,15 @@ Total instruction size: 9 bytes.
 ### 4.2 Semantics
 
 - The object identified by `object_id` must contain a valid CQR buffer.
-- The runtime writes the CQR data to a `.gunzoracle` file.
+- `EXPORT_ORACLE` SHALL serialise that CQR object directly to a file.
+- The file name SHALL be:
+
+    B.orc<object_id>.gunzoracle
+
+  where `B` is the implementation‑defined output base name used for the run, and `<object_id>` is the decimal value of the object table index.
+- If the file already exists, it SHALL be atomically replaced.
+- The CQR object in the object table SHALL remain unchanged after export.
+- The exported file path SHALL NOT be recorded in `.gunzmeta`.
 - If the object does not exist or does not contain a valid CQR, the operation fails with `GUNZ_INVALID_OBJECT`.
 - A non‑zero `reserved` operand causes the bytecode to be rejected with `GUNZ_MALFORMED_BYTECODE`.
 - Fuel cost: HIGH (100), deducted at capture.
@@ -131,7 +181,7 @@ Like `ORACLE`, the `EXPORT_ORACLE` opcode is **always deferred**. It is executed
 ## 5. Output Format
 
 The oracle produces a **Constraint Query Result (CQR)** file with the extension `.gunzoracle`.  
-The file consists of a **48‑byte** header followed by a packed sequence of **96‑byte** interval records.
+The file consists of a **96‑byte** header followed by a packed sequence of **96‑byte** interval records.
 
 All multi‑byte integers are encoded in **little‑endian** byte order.
 
@@ -140,7 +190,7 @@ All multi‑byte integers are encoded in **little‑endian** byte order.
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
 | 0  | u32 | `magic` | `0x4F524143` (“ORAC” in ASCII) |
-| 4  | u32 | `version` | `0x00040401` (v4.4.1). Encoded as `(major << 16) | (minor << 8) | patch`. For 4.4.1: major=4, minor=4, patch=1. |
+| 4  | u32 | `version` | `0x00040507` (v4.5.7). Encoded as `(major << 16) | (minor << 8) | patch`. For 4.5.7: major=4, minor=5, patch=7. |
 | 8  | u8  | `query_class` | Copied from the opcode |
 | 9  | u8  | `reserved` | Must be `0x00` |
 | 10 | u8  | `reserved` | Must be `0x00` |
@@ -149,16 +199,46 @@ All multi‑byte integers are encoded in **little‑endian** byte order.
 | 16 | u32 | `interval_count` | Number of interval records that follow |
 | 20 | u32 | `freq_low` | From the opcode |
 | 24 | u32 | `freq_high` | From the opcode |
-| 28 | u64 | `xxh3_64` | XXH3‑64 checksum (seed=0) over the canonical CQR data (see below). When `interval_count = 0`, the checksum is computed over the header with `xxh3_64` zeroed, and no interval records. |
-| 36 | u64 | `reserved` | Must be `0x0000000000000000` |
-| 44 | u32 | `reserved` | Must be `0x00000000` |
+| 28 | u8  | `time_unit` | Decimal exponent used for the query. Base time unit = `10^(−time_unit)` seconds. |
+| 29 | u8  | `round_mode` | Effective rounding mode used for the query, after any `ROUND` override. 0 = floor, 1 = nearest half‑to‑even, 2 = ceil, 3 = truncate. |
+| 30 | u8  | `hold_cycles` | Hold cycles after target, as captured. |
+| 31 | u8  | `sep_cycles` | Input‑separation cycles, as captured. |
+| 32 | u32 | `quantum` | Clock granularity in base time units. Must be ≥ 1. |
+| 36 | u32 | `target_ticks` | Ticks to reach. Must be ≥ 1. |
+| 40 | u32 | `mult_num` | Effective advance multiplier numerator used for the query, after all VM overrides (`ADVANCE`, `LIBREF`). Non‑zero. |
+| 44 | u32 | `mult_den` | Effective advance multiplier denominator used for the query, after all VM overrides. Non‑zero. |
+| 48 | u32 | `reference_block_time` | Reference block time used for the query, in base time units. |
+| 52 | u8  | `jitter_window_radius` | Scale factor used for the query. `0` means default radius 10000. |
+| 53 | u8  | `delta_override_active` | `0` = no active DELTA override, `1` = active. Values > 1 are malformed. |
+| 54 | u16 | `reserved` | Must be `0x0000`. |
+| 56 | u32 | `d_lo_ov` | Effective explicit delta override `d_lo`, in quantum units, after any `DELTA` or `LIBREF`. Zero when inactive. |
+| 60 | u32 | `d_hi_ov` | Effective explicit delta override `d_hi`, in quantum units, after any `DELTA` or `LIBREF`. Zero when inactive. |
+| 64 | u64 | `xxh3_64` | XXH3‑64 checksum (seed=0) over the canonical CQR data (see below). When `interval_count = 0`, the checksum is computed over the header with `xxh3_64` zeroed, and no interval records. |
+| 72 | u8  | `reference_source` | Provenance of `reference_block_time`: 0 = not applicable, 1 = explicit, 2 = guessed, 3 = calibrated. |
+| 73 | u8  | `reserved` | Must be `0x00` |
+| 74 | u8  | `reserved` | Must be `0x00` |
+| 75 | u8  | `reserved` | Must be `0x00` |
+| 76 | u8  | `reserved` | Must be `0x00` |
+| 77 | u8  | `reserved` | Must be `0x00` |
+| 78 | u8  | `reserved` | Must be `0x00` |
+| 79 | u8  | `reserved` | Must be `0x00` |
+| 80 | u32 | `reserved` | Must be `0x00000000` |
+| 84 | u32 | `reserved` | Must be `0x00000000` |
+| 88 | u32 | `reserved` | Must be `0x00000000` |
+| 92 | u32 | `reserved` | Must be `0x00000000` |
 
-Header size: 48 bytes.
+Header size: **96 bytes**.
+
+All evaluator parameters in the CQR header record the **effective values** used during the query evaluation, after applying all runtime overrides. They SHALL NOT be copied from the original bytecode header without applying the captured VM state.
+
+*(Informative)* The CQR header records the effective evaluator parameters required to interpret the physical meaning of the result metrics (e.g., `time_unit`, `quantum`, `mult_num`). However, the CQR header does **not** serialise the ORACLE query constraint thresholds (`max_block_time_inaccuracy`, `max_jitter`, `max_advance_regularity`, `max_peak_advance_regularity`, `min_stability_width_internal`). These constraints define the question that produced the intervals, not the physical units of the answers. If exact query reproducibility is required, the constraint thresholds are recorded in the companion `.gunzmeta` file under the ORACLE deferred operation entry.
 
 **Canonical CQR data checksum:**  
-The canonical CQR data is the 48‑byte header with the `xxh3_64` field (bytes 28–35) set to zero, followed by all 96‑byte interval records. The `xxh3_64` field is the XXH3‑64 checksum with seed 0 over that entire buffer. During computation, the `xxh3_64` field is treated as zero. This covers both the query parameters and the interval records.
+The canonical CQR data is the 96‑byte header with the `xxh3_64` field (bytes 64–71) set to zero, followed by all 96‑byte interval records. The `xxh3_64` field is the XXH3‑64 checksum with seed 0 over that entire buffer. During computation, the `xxh3_64` field is treated as zero.
 
-A conformant decoder SHALL reject any CQR file whose `version` is not `0x00040401` or that contains any nonzero reserved header byte (offsets 9–11, 36–43, 44–47), returning `GUNZ_MALFORMED_BYTECODE`.
+A conformant decoder SHALL reject any CQR file whose `version` is not `0x00040507` or that contains any nonzero reserved header byte (offsets 9–11, 54–55, 73–95), returning `GUNZ_MALFORMED_BYTECODE`.
+
+*(Informative)* The CQR header now includes the full effective evaluator parameter set used for the query, including `reference_source`, the jitter window radius, and any active DELTA override. A consumer can therefore interpret `best_total_time`, `best_jitter`, `best_advance_regularity`, `best_peak_advance_regularity`, and `best_stability_width_internal` without external plan context. The `time_unit` field is authoritative for all time‑valued fields in this CQR file.
 
 ### 5.2 Interval Record (96 bytes)
 
@@ -178,11 +258,19 @@ A conformant decoder SHALL reject any CQR file whose `version` is not `0x0004040
 | 86 | u16 | `central_above_count` | Number of candidates in the interval with central time above reference. |
 | 88 | u16 | `central_below_count` | Number of candidates in the interval with central time below reference. |
 | 90 | u16 | `central_exact_count` | Number of candidates in the interval with central time exactly equal to reference. |
-| 92 | u32 | `best_total_time` | Exact `total_time` of the best candidate — raw block time plus `(hold_cycles + sep_cycles) × T` — in base time units. If the true value exceeds `UINT32_MAX`, store `UINT32_MAX` and set `best_total_time_overflow`. |
+| 92 | u32 | `best_total_time` | Exact **central** `total_time` of the best candidate — raw block time plus `(hold_cycles + sep_cycles) × T` **at jitter offset Δ = 0** — in base time units. If the true value exceeds `UINT32_MAX`, store `UINT32_MAX` and set `best_total_time_overflow`. |
 
 Total record size: 96 bytes.
 
 All fields are packed without padding. Readers SHALL handle unaligned `u128` fields.
+
+**Canonical CQR fingerprint.** The XXH3‑128 fingerprint for CQR deduplication SHALL be computed over the canonical CQR data, exactly as follows:
+
+1. Take the 96‑byte CQR header with bytes 64–71 (`xxh3_64`) set to zero.
+2. Append immediately, with no padding, all 96‑byte interval records in file order.
+3. Compute XXH3‑128 with seed 0 over that complete byte sequence.
+
+Reserved header bytes, including their zero values, SHALL be included. The `xxh3_64` field is the only header field excluded by zeroing. Interval records SHALL be packed consecutively with no padding between them.
 
 **Tie‑breaking rule for `best_freq`:**  
 The best candidate in an interval is determined by:
@@ -195,8 +283,12 @@ The best candidate in an interval is determined by:
 
 The `best_total_time` and `best_central_flags` fields correspond to that chosen best candidate.
 
+*(Informative Implementation Note)* The core evaluator exposes central direction through `FLAG_CENTRAL_ABOVE` (bit 4) and `FLAG_CENTRAL_BELOW` (bit 5). Implementers MUST translate these core bitflags into the CQR encoding `0` (exact), `1` (above), `2` (below) before writing the CQR record. Copying the raw core flag byte directly into `best_central_flags` will cause invalid reserved‑bit rejection.
+
 **Interval splitting rule:**  
 Because `central_above_count`, `central_below_count`, and `central_exact_count` are `u16`, no interval shall have `interval_candidate_count > 65535`. If a contiguous run of passing candidates exceeds 65535 candidates, the emitter SHALL split it into two or more intervals, each with at most 65535 candidates. Splitting must preserve the frequency ordering and all metric summaries.
+
+When splitting an interval, the `best_*` metrics, `best_freq`, `best_total_time`, `best_central_flags`, and all central‑direction counts SHALL be recomputed independently for each resulting sub‑interval, based solely on the candidates contained within that specific sub‑interval.
 
 *(Informative)* Earlier ORACLE drafts reused the saturated `u16` map‑entry stability width to keep CQR and map fields directly comparable. With the 96‑byte interval record, that restriction is unnecessary. The current specification stores the unsaturation `stability_width_internal` instead, preserving full precision for query results and calibrated‑reference workflows.
 
@@ -221,7 +313,7 @@ The stored `best_stability_width_internal` in every interval record SHALL also b
 
 `best_total_time` is meaningful as a calibrated reference **only** when `best_total_time_overflow == 0`. If the overflow flag is set, the stored `best_total_time` is `UINT32_MAX` and SHALL NOT be used as a reference value.
 
-CQR files are cacheable and may be deduplicated using an XXH3‑128 fingerprint computed over the header (excluding the `xxh3_64` field) and the interval records, with **seed 0**.
+CQR files are cacheable and may be deduplicated using the canonical CQR fingerprint defined above.
 
 ---
 
@@ -259,7 +351,8 @@ The candidate frequencies that map to a given `T` form a contiguous integer inte
    c. **Block‑time pre‑filter.**  
       Run the core N‑search procedure exactly as specified in GUNZ 5.0.0 §3.11 step 3.  
       If the N‑search fails, **skip the entire plateau**.  
-      Otherwise, compute `block_time_inaccuracy` in full precision and compare against `max_block_time_inaccuracy`.  
+      Otherwise, compute `block_time_inaccuracy` in full precision as `|total_time − reference_block_time|`, using the `reference_block_time` captured from the current system state, and compare against `max_block_time_inaccuracy`.  
+      When `reference_source == 0` and `reference_block_time == 0`, the computation SHALL be `|total_time|`, i.e. the absolute central total time.  
       If it exceeds the constraint, discard the plateau.
 
    d. **Full evaluation of passing candidates.**  
@@ -319,11 +412,77 @@ plus one additional candidate if `(freq_high − freq_low)` is not an exact mult
 
 For multiple ORACLE queries in the same deferred queue, the running total shall include the candidate counts of all previously executed ORACLE queries, in capture order.
 
+*(Informative)* The extra `+1` candidate accounts for the separately evaluated off‑grid `freq_high`, not for the nearest grid point. For example, with `freq_low = 100`, `freq_high = 107`, and `effective_step = 3`, the grid anchored at `freq_low` contains `100, 103, 106`, and `freq_high = 107` is evaluated separately. The count is therefore `floor((107 − 100) / 3) + 1 + 1 = 2 + 1 + 1 = 4`, matching the four candidates `100, 103, 106, 107`.
+
+### 6.6 Grid‑Correction, Temporal Scaling, and Provenance for Main‑Scan Use *(Informative)*
+
+When an AI agent or host intends to use ORACLE intervals to define `ZONE` or `SKIP_ZONE` instructions in a later static scan, the following deterministic corrections SHALL be applied.
+
+**Frequency Grid Correction**
+
+- Let `base_freq` be the target static scan’s grid anchor, and `effective_step` be its resolved dense‑scan step.
+- For each ORACLE interval `[start_freq, end_freq]`:
+
+  1. Compute the first grid‑aligned candidate ≥ `start_freq`:
+     ```text
+     offset = start_freq − base_freq
+     if offset % effective_step != 0:
+         offset += effective_step − (offset % effective_step)
+     start_aligned = base_freq + offset
+     ```
+
+  2. Compute the last grid‑aligned candidate ≤ `end_freq`:
+     ```text
+     offset = end_freq − base_freq
+     offset -= offset % effective_step
+     end_aligned = base_freq + offset
+     ```
+
+  3. If `start_aligned ≤ end_aligned`, use `[start_aligned, end_aligned]` as the corrected range. Otherwise, discard the interval: it contains no candidate on the target grid.
+
+**Topological Rule**
+
+- If emitting multiple zones from multiple corrected intervals, sort them by ascending `freq_low` and enforce strict disjointness:
+  ```text
+  freq_low_next ≥ freq_high_prev + effective_step
+  ```
+- If this condition is not met, merge, trim, or discard intervals until it is satisfied. Do not emit overlapping or adjacent zones without the required step gap.
+
+**Calibrated Reference and Temporal Scaling**
+
+- `best_total_time` is independent of frequency grid alignment, but it is **bound to the `time_unit` recorded in the CQR header**. If the target static scan uses the same `time_unit`, use `best_total_time` directly; otherwise scale as defined below.
+- If the target static scan uses a different `time_unit`, scale as follows:
+
+  ```text
+  new_reference =
+      best_total_time × 10^(target_time_unit − oracle_time_unit)
+  ```
+
+  - If `target_time_unit > oracle_time_unit` (finer scan), this is a multiplication; perform it in at least 128‑bit unsigned arithmetic and verify the result fits `u32`.
+  - If `target_time_unit < oracle_time_unit` (coarser scan), perform integer division by `10^(oracle_time_unit − target_time_unit)` using half‑to‑even rounding per GUNZ 5.0.0 §4.5.1, and verify the result fits `u32`.
+
+- When applying this calibrated time, the caller SHALL set:
+  ```text
+  reference_source = 3
+  ```
+  in the new plan configuration.
+
+**Usage note**
+
+- `best_freq` is informational only. It SHALL NOT be used as a frequency boundary for a later static scan unless the frequency grid correction above is applied.
+- If `best_total_time_overflow == 1`, `best_total_time` is `UINT32_MAX` and SHALL NOT be used as a calibrated reference. The host must choose a coarser `time_unit` for the ORACLE query and repeat it.
+
 ---
 
 ## 7. Stability‑Width Query Algorithm (Full Path)
 
 When `query_class = 1`, the oracle runs the full dense scan (GUNZ 5.0.0 §3.11, both phases) over the query range.
+
+If `freq_high` is not of the form `freq_low + k × effective_step`, it SHALL be evaluated and grouped as an additional single candidate, exactly as in §6.2 step 3. The resulting interval grouping rules of this section apply to that candidate as they do to the grid candidates.
+
+For `query_class = 1`, an off‑grid `freq_high` SHALL be inserted into the dense Phase 2 candidate array **before** Phase 2 stability‑width computation, at its correct frequency position relative to the grid candidates. Phase 2 SHALL then be run once over the combined candidate set. The resulting stability widths — including for the off‑grid candidate and for any grid candidates whose plateaus may extend into it — SHALL be used for all subsequent constraint checks and interval grouping.
+
+For the purpose of Phase 2 plateau construction, an off‑grid `freq_high` candidate SHALL be considered adjacent to its immediate lower and upper evaluated neighbors in the dense candidate array, even when the frequency difference is not exactly `effective_step`. No extra candidate is synthesized between them.
 
 The oracle SHALL use the **dense, unconsolidated Phase 2 candidate array** before map‑entry consolidation and sparse emission. It SHALL NOT use the consolidated map entries, because consolidation may merge candidates with different internal `stability_width_internal` values into a single entry when their saturated `u16` map‑entry widths are identical and `STAB_SATURATED` is set.
 
@@ -340,7 +499,7 @@ The dense Phase 2 candidate array SHALL include, for every evaluated candidate
    - Apply the stability‑width constraint:
      - `stability_width_internal ≥ min_stability_width_internal`
 
-2. Group consecutive passing candidates in ascending frequency order. Two candidates are consecutive if they are adjacent in the global frequency grid and their frequencies differ by exactly `effective_step`.
+2. Group consecutive passing candidates in ascending frequency order. Two candidates are consecutive if they are adjacent in the **ORACLE query grid anchored at `freq_low`** and their frequencies differ by exactly `effective_step`.
 
 3. For each group, emit one CQR interval record with:
    - `start_freq` = first candidate’s frequency
@@ -368,6 +527,8 @@ If `interval_candidate_count` would exceed 65535, split the group exactly as spe
 If no candidate satisfies all constraints, the CQR file contains zero records.
 
 The same iteration‑limit checks of §6.5 apply.
+
+No `FLAG_AVOID` exclusion is performed, because ORACLE does not run detrimental marking.
 
 *(Informative Optimization Guidance — Extended Performance Update)*
 
@@ -425,6 +586,8 @@ If `best_total_time_overflow == 0`, the host may directly use `best_total_time` 
 
 If `best_total_time_overflow == 1`, the true total time exceeds `UINT32_MAX` and cannot be used as a calibrated reference. The host must choose a coarser `time_unit` or use a different reference.
 
+*(Informative)* The calibrated reference is `best_total_time`, not `best_freq`. `best_total_time` represents the physical timing target, independent of the ORACLE query’s frequency grid. A later static scan may therefore use `best_total_time` to anchor its resonance search even if `best_freq` is not aligned with that scan’s `base_freq`. However, because `reference_block_time` is stored as an integer count of base time units, the AI agent MUST scale `best_total_time` to match the `time_unit` exponent of the new scan before injecting it as the calibrated reference, as defined in §6.6.
+
 ---
 
 ## 9. Conformance
@@ -438,21 +601,42 @@ A conformant GUNZ‑ORACLE implementation must:
 - Implement the plateau‑walk algorithm of §6.2 with full‑precision comparisons.
 - For `query_class = 1`, run the full dense scan using the dense, unconsolidated Phase 2 candidate array, excluding `FLAG_INVALID` and `FLAG_SKIPPED` candidates.
 - Use **128‑bit unsigned arithmetic** for all total‑time and block‑time calculations, and for the N‑search.
-- Produce valid CQR files with a 48‑byte header and 96‑byte interval records.
+- Produce valid CQR files with a 96‑byte header and 96‑byte interval records.
 - Treat the captured `effective_step` as the resolved dense‑scan step size.
 - Implement the always‑deferred execution model.
 - Store the CQR result in the object table at the given `object_id`.
+- When `EXPORT_ORACLE` is supported, serialise the CQR object to a file using the deterministic name `B.orc<object_id>.gunzoracle`. The exported file path SHALL NOT be included in `.gunzmeta`.
 - Enforce iteration‑limit bounds as defined in §6.5, including the leftover global budget rule and multiple‑query running total.
 - Reject any `ORACLE` query with `GUNZ_INVALID_LIBRARY` if `long_term_scan` is active.
+- Reject any `ORACLE` query with `GUNZ_INVALID_LIBRARY` if `reference_block_time == 0` and `reference_source != 0`.
 - Abort the deferred queue and propagate errors.
 - Ensure the central‑direction count invariant holds for every emitted interval.
 - Reject any CQR interval where `best_central_flags > 2` or reserved bits in `best_central_flags` are set.
-- Reject any CQR file where `version != 0x00040401` or any reserved header byte is non‑zero.
-- Reject any CQR file whose size is not exactly `48 + interval_count × 96` bytes.
+- Reject any CQR file where `version != 0x00040507` or any reserved header byte is non‑zero, returning `GUNZ_MALFORMED_BYTECODE`.
+- Reject any CQR file whose size is not exactly `96 + interval_count × 96` bytes.
 - Split intervals so that no `interval_candidate_count` exceeds 65535.
+- Recompute all `best_*` metrics, `best_freq`, `best_total_time`, central flags, and central counts independently for each split sub‑interval.
 - Handle unaligned `u128` reads in both bytecode and CQR.
 - Compute the CQR `xxh3_64` checksum over the header with `xxh3_64` zeroed plus all interval records.
+- Compute the canonical CQR fingerprint as specified in §5.2: header with `xxh3_64` zeroed, followed by all interval records, XXH3‑128 seed 0.
 - Use `stability_width_internal` for both `best_stability_width_internal` storage and `min_stability_width_internal` comparison. Never use the saturated `u16` map‑entry `stability_width`.
+- Write and validate the new evaluator parameter fields in the CQR header.
+- Write the captured `reference_source` into the CQR header at offset 72.
+- Reject any CQR header where `effective_step == 0`, returning `GUNZ_MALFORMED_BYTECODE`.
+- Reject any CQR header where `quantum == 0`, `target_ticks == 0`, `mult_num == 0`, `mult_den == 0`, `time_unit > 12`, or `round_mode > 3`, returning `GUNZ_MALFORMED_BYTECODE`.
+- Reject any CQR header where `jitter_window_radius > 255`, returning `GUNZ_MALFORMED_BYTECODE`.
+- Reject any CQR header where `delta_override_active` is not `0` or `1`, returning `GUNZ_MALFORMED_BYTECODE`.
+- Reject any CQR header where `delta_override_active == 1` and `d_lo_ov > d_hi_ov`, returning `GUNZ_MALFORMED_BYTECODE`.
+- Reject any CQR header where `delta_override_active == 0` and either `d_lo_ov != 0` or `d_hi_ov != 0`, returning `GUNZ_MALFORMED_BYTECODE`.
+- Reject any CQR header where `reference_source > 3`, returning `GUNZ_MALFORMED_BYTECODE`.
+- Reject any CQR header where `reference_block_time == 0` and `reference_source != 0`, returning `GUNZ_MALFORMED_BYTECODE`.
+- Reject any CQR file containing nonzero bytes in any reserved header region: offsets 9–11, 54–55, and 73–95, returning `GUNZ_MALFORMED_BYTECODE`.
+- Ensure that pending `PURE_CALL` specifications are not serialised into the CQR header.
+- Ensure that no query constraint threshold is stored in the CQR header.
+- Ensure that ORACLE evaluation never performs detrimental‑mode `FLAG_AVOID` marking.
+- In `query_class = 1`, evaluate and group an off‑grid `freq_high` exactly as §6.2 step 3 requires.
+- In `query_class = 1`, insert an off‑grid `freq_high` into the dense Phase 2 candidate array before Phase 2 stability‑width computation, as required by §7.
+- In every CQR interval where `query_class == 0`, ensure `best_stability_width_internal == 0`.
 
 *(Optional diagnostic)* A conformant decoder MAY flag any CQR interval where `best_stability_width_internal` is zero while `query_class = 1` and at least one evaluated candidate exists, as a warning. This is not a conformance failure; a zero internal plateau width is legitimate in some configurations.
 
@@ -484,6 +668,8 @@ EXPORT_ORACLE 1, 0
 ```
 
 The host reads the resulting `.gunzoracle` file, extracts `best_freq`, `best_total_time`, and `best_total_time_overflow`. If `best_total_time_overflow == 0`, it uses `best_total_time` directly as the calibrated `reference_block_time`, with `reference_source = 3`. No additional evaluation is needed.
+
+The example logic is unchanged. Only the binary CQR layout changes: the header is now 96 bytes, and the `version` field is `0x00040507`.
 
 ---
 
@@ -539,4 +725,4 @@ The use of these techniques SHALL NOT alter the final CQR interval records.
 The bitmask is purely a memory‑layout optimisation; the compaction pass
 must exactly reconstruct the normative grouping rules of §7.
 
-*GUNZ‑ORACLE — Companion to GUNZ 5.0.0 — version 4.4.1*
+*GUNZ‑ORACLE — Companion to GUNZ 5.0.0 — version 4.5.7*
