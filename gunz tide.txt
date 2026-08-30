@@ -342,6 +342,8 @@ For a given output base name `B`:
 ```text
 B.tide<phase_index>.gunzmap
 B.tide<phase_index>.gunzmeta
+B.tide<phase_index>.gunzstats   (if raw statistics are emitted)
+B.tide<phase_index>.gunzstatz   (if compressed statistics are emitted)
 B.gunztide
 ```
 
