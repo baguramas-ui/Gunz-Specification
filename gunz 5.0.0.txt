@@ -1,3 +1,6 @@
+Authored by Amice Corentin & Deepseek.
+
+
 # GUNZ 5.0.0H — Graduated Underlying Navigation Zones -
 **ISA · Runtime · Library**
 
